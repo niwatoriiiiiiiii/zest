@@ -1,7 +1,7 @@
 use crate::core::Color;
 
 /// Types of pieces in Gardner minichess.
-#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Hash)]
 pub enum PieceType {
     /// Pawn piece.
     Pawn,
