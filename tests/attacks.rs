@@ -1,7 +1,7 @@
 #![allow(missing_docs)]
 
-use zest::core::Square;
-use zest::movegen::{king_attacks, knight_attacks};
+use zest::core::{Color, Square};
+use zest::movegen::{king_attacks, knight_attacks, pawn_attacks};
 
 #[test]
 fn test_knight_attacks_center() {
@@ -75,4 +75,42 @@ fn test_king_attacks_edge() {
     assert!(attacks.contains(Square::B3));
     assert!(attacks.contains(Square::B4));
     assert!(attacks.contains(Square::A4));
+}
+
+#[test]
+fn test_pawn_attacks_white() {
+    // White pawn at C2 attacks B3 and D3 (diagonal up)
+    let attacks = pawn_attacks(Square::C2, Color::White);
+    assert_eq!(attacks.count(), 2);
+    assert!(attacks.contains(Square::B3));
+    assert!(attacks.contains(Square::D3));
+
+    // White pawn at A2 (left edge) only attacks B3 (right diagonal up)
+    let left_edge = pawn_attacks(Square::A2, Color::White);
+    assert_eq!(left_edge.count(), 1);
+    assert!(left_edge.contains(Square::B3));
+
+    // White pawn at E2 (right edge) only attacks D3 (left diagonal up)
+    let right_edge = pawn_attacks(Square::E2, Color::White);
+    assert_eq!(right_edge.count(), 1);
+    assert!(right_edge.contains(Square::D3));
+}
+
+#[test]
+fn test_pawn_attacks_black() {
+    // Black pawn at C4 attacks B3 and D3 (diagonal down)
+    let attacks = pawn_attacks(Square::C4, Color::Black);
+    assert_eq!(attacks.count(), 2);
+    assert!(attacks.contains(Square::B3));
+    assert!(attacks.contains(Square::D3));
+
+    // Black pawn at A4 (left edge) only attacks B3 (right diagonal down)
+    let left_edge = pawn_attacks(Square::A4, Color::Black);
+    assert_eq!(left_edge.count(), 1);
+    assert!(left_edge.contains(Square::B3));
+
+    // Black pawn at E4 (right edge) only attacks D3 (left diagonal down)
+    let right_edge = pawn_attacks(Square::E4, Color::Black);
+    assert_eq!(right_edge.count(), 1);
+    assert!(right_edge.contains(Square::D3));
 }
