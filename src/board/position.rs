@@ -1,4 +1,4 @@
-use crate::core::{Color, Piece, PieceType, Square};
+use crate::core::{Color, Move, Piece, PieceType, Square};
 
 /// Represents the state of a 5x5 Gardner minichess board.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -62,6 +62,21 @@ impl Board {
         board.pieces[24] = Some(Piece::new(Color::Black, PieceType::King));
 
         board
+    }
+
+    /// Applies a move to the board, updating piece positions, promotions, and the side to move.
+    pub fn make_move(&mut self, m: Move) {
+        let Some(mut piece) = self.piece_at(m.from()) else {
+            return;
+        };
+        self.set_piece(m.from(), None);
+
+        if let Some(promo_type) = m.promotion() {
+            piece.piece_type = promo_type;
+        }
+        self.set_piece(m.to(), Some(piece));
+
+        self.side_to_move = !self.side_to_move;
     }
 }
 

@@ -1,7 +1,7 @@
 #![allow(missing_docs)]
 
 use zest::board::Board;
-use zest::core::{Color, Piece, PieceType, Square};
+use zest::core::{Color, Move, Piece, PieceType, Square};
 
 #[test]
 fn test_empty_board() {
@@ -147,4 +147,59 @@ fn test_board_display() {
     );
 
     assert_eq!(display_str, expected);
+}
+
+#[test]
+fn test_make_move_sequence() {
+    let mut board = Board::gardner_initial();
+
+    // 1. White plays c2c3
+    let m1 = Move::new(Square::C2, Square::C3, None);
+    board.make_move(m1);
+    assert_eq!(board.piece_at(Square::C2), None);
+    assert_eq!(
+        board.piece_at(Square::C3),
+        Some(Piece::new(Color::White, PieceType::Pawn))
+    );
+    assert_eq!(board.side_to_move(), Color::Black);
+
+    // 2. Black captures with d4c3
+    let m2 = Move::new(Square::D4, Square::C3, None);
+    board.make_move(m2);
+    assert_eq!(board.piece_at(Square::D4), None);
+    assert_eq!(
+        board.piece_at(Square::C3),
+        Some(Piece::new(Color::Black, PieceType::Pawn))
+    );
+    assert_eq!(board.side_to_move(), Color::White);
+}
+
+#[test]
+fn test_make_move_promotion() {
+    let mut board = Board::empty();
+    // Put a white pawn on E4
+    board.set_piece(Square::E4, Some(Piece::new(Color::White, PieceType::Pawn)));
+
+    // Promote E4 -> E5 to Queen
+    let m = Move::new(Square::E4, Square::E5, Some(PieceType::Queen));
+    board.make_move(m);
+
+    assert_eq!(board.piece_at(Square::E4), None);
+    assert_eq!(
+        board.piece_at(Square::E5),
+        Some(Piece::new(Color::White, PieceType::Queen))
+    );
+    assert_eq!(board.side_to_move(), Color::Black);
+}
+
+#[test]
+fn test_make_move_empty_source_is_noop() {
+    let mut board = Board::gardner_initial();
+    let before = board;
+
+    // C3 is empty, moving from C3 should do nothing
+    let m = Move::new(Square::C3, Square::C4, None);
+    board.make_move(m);
+
+    assert_eq!(board, before);
 }
