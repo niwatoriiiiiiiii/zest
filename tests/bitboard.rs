@@ -115,3 +115,21 @@ fn test_bitboard_pop_lsb_all_squares() {
     assert!(bb.is_empty());
     assert_eq!(bb.pop_lsb(), None);
 }
+
+#[test]
+fn test_bitboard_bitor() {
+    let mut bb1 = Bitboard::empty();
+    bb1.set(Square::A1);
+    bb1.set(Square::C3);
+
+    let mut bb2 = Bitboard::empty();
+    bb2.set(Square::C3);
+    bb2.set(Square::E5);
+
+    let combined = bb1 | bb2;
+    assert_eq!(combined.count(), 3);
+    assert!(combined.contains(Square::A1));
+    assert!(combined.contains(Square::C3));
+    assert!(combined.contains(Square::E5));
+    assert!(!combined.contains(Square::B2));
+}

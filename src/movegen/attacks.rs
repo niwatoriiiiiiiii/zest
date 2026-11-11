@@ -26,6 +26,9 @@ const KING_MOVES: [(i8, i8); 8] = [
 const WHITE_PAWN_ATTACKS: [(i8, i8); 2] = [(1, 1), (-1, 1)];
 const BLACK_PAWN_ATTACKS: [(i8, i8); 2] = [(1, -1), (-1, -1)];
 
+const ROOK_DIRECTIONS: [(i8, i8); 4] = [(0, 1), (0, -1), (1, 0), (-1, 0)];
+const BISHOP_DIRECTIONS: [(i8, i8); 4] = [(1, 1), (1, -1), (-1, 1), (-1, -1)];
+
 /// Returns a bitboard of all squares attacked by a knight on the given `sq`.
 #[must_use]
 pub fn knight_attacks(sq: Square) -> Bitboard {
@@ -47,6 +50,24 @@ pub fn pawn_attacks(sq: Square, color: Color) -> Bitboard {
     }
 }
 
+/// Returns a bitboard of all squares attacked by a rook on the given `sq` with the given `occupied` squares.
+#[must_use]
+pub fn rook_attacks(sq: Square, occupied: Bitboard) -> Bitboard {
+    slider_attacks(sq, &ROOK_DIRECTIONS, occupied)
+}
+
+/// Returns a bitboard of all squares attacked by a bishop on the given `sq` with the given `occupied` squares.
+#[must_use]
+pub fn bishop_attacks(sq: Square, occupied: Bitboard) -> Bitboard {
+    slider_attacks(sq, &BISHOP_DIRECTIONS, occupied)
+}
+
+/// Returns a bitboard of all squares attacked by a queen on the given `sq` with the given `occupied` squares.
+#[must_use]
+pub fn queen_attacks(sq: Square, occupied: Bitboard) -> Bitboard {
+    rook_attacks(sq, occupied) | bishop_attacks(sq, occupied)
+}
+
 fn step_attacks(sq: Square, deltas: &[(i8, i8)]) -> Bitboard {
     let mut bb = Bitboard::empty();
     let file = sq.file().cast_signed();
@@ -61,6 +82,34 @@ fn step_attacks(sq: Square, deltas: &[(i8, i8)]) -> Bitboard {
             && let Some(target_sq) = Square::new(to_f.cast_unsigned(), to_r.cast_unsigned())
         {
             bb.set(target_sq);
+        }
+    }
+
+    bb
+}
+
+fn slider_attacks(sq: Square, deltas: &[(i8, i8)], occupied: Bitboard) -> Bitboard {
+    let mut bb = Bitboard::empty();
+
+    for (df, dr) in deltas {
+        let mut cur_f = sq.file().cast_signed();
+        let mut cur_r = sq.rank().cast_signed();
+
+        loop {
+            cur_f += df;
+            cur_r += dr;
+
+            if !(0..5).contains(&cur_f) || !(0..5).contains(&cur_r) {
+                break;
+            }
+
+            if let Some(target_sq) = Square::new(cur_f.cast_unsigned(), cur_r.cast_unsigned()) {
+                bb.set(target_sq);
+
+                if occupied.contains(target_sq) {
+                    break;
+                }
+            }
         }
     }
 

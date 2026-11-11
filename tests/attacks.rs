@@ -1,7 +1,10 @@
 #![allow(missing_docs)]
 
+use zest::board::Bitboard;
 use zest::core::{Color, Square};
-use zest::movegen::{king_attacks, knight_attacks, pawn_attacks};
+use zest::movegen::{
+    bishop_attacks, king_attacks, knight_attacks, pawn_attacks, queen_attacks, rook_attacks,
+};
 
 #[test]
 fn test_knight_attacks_center() {
@@ -113,4 +116,128 @@ fn test_pawn_attacks_black() {
     let right_edge = pawn_attacks(Square::E4, Color::Black);
     assert_eq!(right_edge.count(), 1);
     assert!(right_edge.contains(Square::D3));
+}
+
+#[test]
+fn test_rook_attacks_open_board() {
+    // Rook at C3 on open board: 4 horizontal + 4 vertical = 8 squares
+    let attacks = rook_attacks(Square::C3, Bitboard::empty());
+    assert_eq!(attacks.count(), 8);
+
+    assert!(attacks.contains(Square::C1));
+    assert!(attacks.contains(Square::C2));
+    assert!(attacks.contains(Square::C4));
+    assert!(attacks.contains(Square::C5));
+    assert!(attacks.contains(Square::A3));
+    assert!(attacks.contains(Square::B3));
+    assert!(attacks.contains(Square::D3));
+    assert!(attacks.contains(Square::E3));
+
+    // Rook at A1 on open board: 4 vertical (A2..A5) + 4 horizontal (B1..E1) = 8 squares
+    let corner = rook_attacks(Square::A1, Bitboard::empty());
+    assert_eq!(corner.count(), 8);
+    assert!(corner.contains(Square::A2));
+    assert!(corner.contains(Square::A3));
+    assert!(corner.contains(Square::A4));
+    assert!(corner.contains(Square::A5));
+    assert!(corner.contains(Square::B1));
+    assert!(corner.contains(Square::C1));
+    assert!(corner.contains(Square::D1));
+    assert!(corner.contains(Square::E1));
+}
+
+#[test]
+fn test_rook_attacks_blocked() {
+    // Rook at C3 with obstacle at C4
+    let mut occupied = Bitboard::empty();
+    occupied.set(Square::C4);
+
+    let attacks = rook_attacks(Square::C3, occupied);
+    // Should hit C4, but NOT C5 (blocked)
+    assert!(attacks.contains(Square::C4));
+    assert!(!attacks.contains(Square::C5));
+    // Other 3 directions should be intact
+    assert_eq!(attacks.count(), 7);
+
+    // Completely surrounded by adjacent pieces
+    let mut surrounded = Bitboard::empty();
+    surrounded.set(Square::C4);
+    surrounded.set(Square::C2);
+    surrounded.set(Square::B3);
+    surrounded.set(Square::D3);
+
+    let trapped = rook_attacks(Square::C3, surrounded);
+    assert_eq!(trapped.count(), 4);
+    assert!(trapped.contains(Square::C4));
+    assert!(trapped.contains(Square::C2));
+    assert!(trapped.contains(Square::B3));
+    assert!(trapped.contains(Square::D3));
+}
+
+#[test]
+fn test_bishop_attacks_open_board() {
+    // Bishop at C3 on open board: 2 squares in each of 4 diagonal rays = 8 squares
+    let attacks = bishop_attacks(Square::C3, Bitboard::empty());
+    assert_eq!(attacks.count(), 8);
+
+    assert!(attacks.contains(Square::A1));
+    assert!(attacks.contains(Square::B2));
+    assert!(attacks.contains(Square::D4));
+    assert!(attacks.contains(Square::E5));
+
+    assert!(attacks.contains(Square::A5));
+    assert!(attacks.contains(Square::B4));
+    assert!(attacks.contains(Square::D2));
+    assert!(attacks.contains(Square::E1));
+
+    // Bishop at A1 (corner): 4 squares along the long diagonal
+    let corner = bishop_attacks(Square::A1, Bitboard::empty());
+    assert_eq!(corner.count(), 4);
+    assert!(corner.contains(Square::B2));
+    assert!(corner.contains(Square::C3));
+    assert!(corner.contains(Square::D4));
+    assert!(corner.contains(Square::E5));
+}
+
+#[test]
+fn test_bishop_attacks_blocked() {
+    // Bishop at C3 with obstacle at D4
+    let mut occupied = Bitboard::empty();
+    occupied.set(Square::D4);
+
+    let attacks = bishop_attacks(Square::C3, occupied);
+    // Should reach D4, but NOT E5
+    assert!(attacks.contains(Square::D4));
+    assert!(!attacks.contains(Square::E5));
+    // 8 - 1 = 7 squares
+    assert_eq!(attacks.count(), 7);
+}
+
+#[test]
+fn test_queen_attacks_open_board() {
+    // Queen at C3: rook (8) + bishop (8) = 16 squares
+    let attacks = queen_attacks(Square::C3, Bitboard::empty());
+    assert_eq!(attacks.count(), 16);
+
+    // Queen at A1: rook (8) + bishop (4) = 12 squares
+    let corner = queen_attacks(Square::A1, Bitboard::empty());
+    assert_eq!(corner.count(), 12);
+}
+
+#[test]
+fn test_queen_attacks_blocked() {
+    // Queen at C3 with blockers at C4 (orthogonal) and D4 (diagonal)
+    let mut occupied = Bitboard::empty();
+    occupied.set(Square::C4);
+    occupied.set(Square::D4);
+
+    let attacks = queen_attacks(Square::C3, occupied);
+    // Blocked rays stop behind blockers
+    assert!(attacks.contains(Square::C4));
+    assert!(!attacks.contains(Square::C5));
+    assert!(attacks.contains(Square::D4));
+    assert!(!attacks.contains(Square::E5));
+
+    // 16 - 2 = 14 squares
+    assert_eq!(attacks.count(), 14);
 }

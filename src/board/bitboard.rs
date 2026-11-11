@@ -1,4 +1,5 @@
 use crate::core::Square;
+use core::ops::BitOr;
 
 /// Represents a 5x5 board state as a 25-bit mask in a `u32`.
 #[derive(Clone, Copy, PartialEq, Eq, Debug, Default, Hash)]
@@ -75,5 +76,13 @@ impl Bitboard {
         self.0 &= self.0 - 1;
 
         sq
+    }
+}
+
+impl BitOr for Bitboard {
+    type Output = Self;
+
+    fn bitor(self, rhs: Self) -> Self::Output {
+        Self(self.0 | rhs.0)
     }
 }
