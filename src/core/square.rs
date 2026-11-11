@@ -46,7 +46,7 @@ impl Square {
 }
 
 impl Square {
-    /// Creates a square from a file and rank.
+    /// Creates a square from a `file` and `rank`.
     #[must_use]
     pub const fn new(file: u8, rank: u8) -> Option<Self> {
         if file < 5 && rank < 5 {

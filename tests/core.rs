@@ -1,6 +1,6 @@
 #![allow(missing_docs)]
 
-use zest::core::{Color, PieceType, Square};
+use zest::core::{Color, Piece, PieceType, Square};
 
 #[test]
 fn test_color_opposite() {
@@ -53,4 +53,15 @@ fn test_all_squares_consistency() {
         assert_eq!(sq.as_u8() as usize, i);
         assert_eq!(Square::new(sq.file(), sq.rank()), Some(sq));
     }
+}
+
+#[test]
+fn test_piece_char() {
+    let white_pawn = Piece::new(Color::White, PieceType::Pawn);
+    let black_knight = Piece::new(Color::Black, PieceType::Knight);
+
+    assert_eq!(white_pawn.to_char(), 'P');
+    assert_eq!(black_knight.to_char(), 'n');
+    assert_eq!(white_pawn.color, Color::White);
+    assert_eq!(white_pawn.piece_type, PieceType::Pawn);
 }

@@ -1,7 +1,7 @@
-pub mod color;
-pub mod piece;
-pub mod square;
+mod color;
+mod piece;
+mod square;
 
 pub use color::Color;
-pub use piece::PieceType;
+pub use piece::{Piece, PieceType};
 pub use square::Square;
