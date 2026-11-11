@@ -72,9 +72,10 @@ impl std::fmt::Display for Board {
 
             write!(f, " |")?;
             for file in 0..5 {
-                let sq = Square::new(file, rank).unwrap();
-                let ch = self.piece_at(sq).map_or(' ', Piece::to_char);
-                write!(f, " {ch} |")?;
+                if let Some(sq) = Square::new(file, rank) {
+                    let ch = self.piece_at(sq).map_or(' ', Piece::to_char);
+                    write!(f, " {ch} |")?;
+                }
             }
 
             writeln!(f, " {}", rank + 1)?;

@@ -56,6 +56,12 @@ impl Square {
         }
     }
 
+    /// Creates a square from an `index`.
+    #[must_use]
+    pub const fn from_index(index: u8) -> Option<Self> {
+        Self::new(index % 5, index / 5)
+    }
+
     /// Returns the file of the square.
     #[must_use]
     pub const fn file(self) -> u8 {
