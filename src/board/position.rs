@@ -1,7 +1,5 @@
-use crate::{
-    board::Bitboard,
-    core::{Color, Move, Piece, PieceType, Square},
-};
+use crate::board::Bitboard;
+use crate::core::{Color, Move, Piece, PieceType, Square};
 
 /// Represents the state of a 5x5 Gardner minichess board.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]

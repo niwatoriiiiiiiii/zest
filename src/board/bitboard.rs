@@ -1,5 +1,6 @@
-use crate::core::Square;
 use core::ops::BitOr;
+
+use crate::core::Square;
 
 /// Represents a 5x5 board state as a 25-bit mask in a `u32`.
 #[derive(Clone, Copy, PartialEq, Eq, Debug, Default, Hash)]
