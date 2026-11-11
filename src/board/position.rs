@@ -1,9 +1,13 @@
-use crate::core::{Color, Move, Piece, PieceType, Square};
+use crate::{
+    board::Bitboard,
+    core::{Color, Move, Piece, PieceType, Square},
+};
 
 /// Represents the state of a 5x5 Gardner minichess board.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub struct Board {
     pieces: [Option<Piece>; 25],
+    occupied: Bitboard,
     side_to_move: Color,
 }
 
@@ -13,6 +17,7 @@ impl Board {
     pub const fn empty() -> Self {
         Self {
             pieces: [None; 25],
+            occupied: Bitboard::EMPTY,
             side_to_move: Color::White,
         }
     }
@@ -26,6 +31,11 @@ impl Board {
     /// Places a `piece` on the given `sq`, or clears the square if `piece` is `None`.
     pub const fn set_piece(&mut self, sq: Square, piece: Option<Piece>) {
         self.pieces[sq.index()] = piece;
+        if piece.is_some() {
+            self.occupied.set(sq);
+        } else {
+            self.occupied.clear(sq);
+        }
     }
 
     /// Returns the side to move for the current position.
@@ -39,27 +49,45 @@ impl Board {
     pub const fn gardner_initial() -> Self {
         let mut board = Self::empty();
 
-        // A2 ~ E2, A4 ~ E4
-        let mut i = 5;
-        while i < 10 {
-            board.pieces[i] = Some(Piece::new(Color::White, PieceType::Pawn));
-            board.pieces[i + 10] = Some(Piece::new(Color::Black, PieceType::Pawn));
-            i += 1;
-        }
+        // Rank 1: White pieces (R, N, B, Q, K)
+        board.set_piece(Square::A1, Some(Piece::new(Color::White, PieceType::Rook)));
+        board.set_piece(
+            Square::B1,
+            Some(Piece::new(Color::White, PieceType::Knight)),
+        );
+        board.set_piece(
+            Square::C1,
+            Some(Piece::new(Color::White, PieceType::Bishop)),
+        );
+        board.set_piece(Square::D1, Some(Piece::new(Color::White, PieceType::Queen)));
+        board.set_piece(Square::E1, Some(Piece::new(Color::White, PieceType::King)));
 
-        // A1 ~ E1
-        board.pieces[0] = Some(Piece::new(Color::White, PieceType::Rook));
-        board.pieces[1] = Some(Piece::new(Color::White, PieceType::Knight));
-        board.pieces[2] = Some(Piece::new(Color::White, PieceType::Bishop));
-        board.pieces[3] = Some(Piece::new(Color::White, PieceType::Queen));
-        board.pieces[4] = Some(Piece::new(Color::White, PieceType::King));
+        // Rank 2: White pawns
+        board.set_piece(Square::A2, Some(Piece::new(Color::White, PieceType::Pawn)));
+        board.set_piece(Square::B2, Some(Piece::new(Color::White, PieceType::Pawn)));
+        board.set_piece(Square::C2, Some(Piece::new(Color::White, PieceType::Pawn)));
+        board.set_piece(Square::D2, Some(Piece::new(Color::White, PieceType::Pawn)));
+        board.set_piece(Square::E2, Some(Piece::new(Color::White, PieceType::Pawn)));
 
-        // A5 ~ E5
-        board.pieces[20] = Some(Piece::new(Color::Black, PieceType::Rook));
-        board.pieces[21] = Some(Piece::new(Color::Black, PieceType::Knight));
-        board.pieces[22] = Some(Piece::new(Color::Black, PieceType::Bishop));
-        board.pieces[23] = Some(Piece::new(Color::Black, PieceType::Queen));
-        board.pieces[24] = Some(Piece::new(Color::Black, PieceType::King));
+        // Rank 4: Black pawns
+        board.set_piece(Square::A4, Some(Piece::new(Color::Black, PieceType::Pawn)));
+        board.set_piece(Square::B4, Some(Piece::new(Color::Black, PieceType::Pawn)));
+        board.set_piece(Square::C4, Some(Piece::new(Color::Black, PieceType::Pawn)));
+        board.set_piece(Square::D4, Some(Piece::new(Color::Black, PieceType::Pawn)));
+        board.set_piece(Square::E4, Some(Piece::new(Color::Black, PieceType::Pawn)));
+
+        // Rank 5: Black pieces (R, N, B, Q, K)
+        board.set_piece(Square::A5, Some(Piece::new(Color::Black, PieceType::Rook)));
+        board.set_piece(
+            Square::B5,
+            Some(Piece::new(Color::Black, PieceType::Knight)),
+        );
+        board.set_piece(
+            Square::C5,
+            Some(Piece::new(Color::Black, PieceType::Bishop)),
+        );
+        board.set_piece(Square::D5, Some(Piece::new(Color::Black, PieceType::Queen)));
+        board.set_piece(Square::E5, Some(Piece::new(Color::Black, PieceType::King)));
 
         board
     }
@@ -77,6 +105,12 @@ impl Board {
         self.set_piece(m.to(), Some(piece));
 
         self.side_to_move = !self.side_to_move;
+    }
+
+    /// Returns a bitboard of all occupied squares on the board.
+    #[must_use]
+    pub const fn occupied(self) -> Bitboard {
+        self.occupied
     }
 }
 

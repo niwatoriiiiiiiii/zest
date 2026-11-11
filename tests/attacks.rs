@@ -1,9 +1,10 @@
 #![allow(missing_docs)]
 
-use zest::board::Bitboard;
-use zest::core::{Color, Square};
+use zest::board::{Bitboard, Board};
+use zest::core::{Color, Piece, PieceType, Square};
 use zest::movegen::{
-    bishop_attacks, king_attacks, knight_attacks, pawn_attacks, queen_attacks, rook_attacks,
+    bishop_attacks, is_square_attacked, king_attacks, knight_attacks, pawn_attacks, queen_attacks,
+    rook_attacks,
 };
 
 #[test]
@@ -240,4 +241,138 @@ fn test_queen_attacks_blocked() {
 
     // 16 - 2 = 14 squares
     assert_eq!(attacks.count(), 14);
+}
+
+#[test]
+fn test_is_square_attacked_pawn() {
+    let mut board = Board::empty();
+    // White pawn at C2
+    board.set_piece(Square::C2, Some(Piece::new(Color::White, PieceType::Pawn)));
+
+    // Diagonals B3 and D3 are attacked by White
+    assert!(is_square_attacked(&board, Square::B3, Color::White));
+    assert!(is_square_attacked(&board, Square::D3, Color::White));
+
+    // Straight forward C3 is NOT an attack
+    assert!(!is_square_attacked(&board, Square::C3, Color::White));
+
+    // Backward diagonals B1, D1 are NOT attacks
+    assert!(!is_square_attacked(&board, Square::B1, Color::White));
+    assert!(!is_square_attacked(&board, Square::D1, Color::White));
+
+    // Black pawn at C4 attacks B3 and D3 (downwards)
+    board.set_piece(Square::C4, Some(Piece::new(Color::Black, PieceType::Pawn)));
+    assert!(is_square_attacked(&board, Square::B3, Color::Black));
+    assert!(is_square_attacked(&board, Square::D3, Color::Black));
+    assert!(!is_square_attacked(&board, Square::C3, Color::Black));
+}
+
+#[test]
+fn test_is_square_attacked_knight() {
+    let mut board = Board::empty();
+    board.set_piece(
+        Square::C3,
+        Some(Piece::new(Color::White, PieceType::Knight)),
+    );
+
+    // All 8 knight squares should be attacked
+    assert!(is_square_attacked(&board, Square::B1, Color::White));
+    assert!(is_square_attacked(&board, Square::D1, Color::White));
+    assert!(is_square_attacked(&board, Square::A2, Color::White));
+    assert!(is_square_attacked(&board, Square::E2, Color::White));
+    assert!(is_square_attacked(&board, Square::A4, Color::White));
+    assert!(is_square_attacked(&board, Square::E4, Color::White));
+    assert!(is_square_attacked(&board, Square::B5, Color::White));
+    assert!(is_square_attacked(&board, Square::D5, Color::White));
+
+    // Other squares should NOT be attacked
+    assert!(!is_square_attacked(&board, Square::C2, Color::White));
+    assert!(!is_square_attacked(&board, Square::C4, Color::White));
+    assert!(!is_square_attacked(&board, Square::B3, Color::White));
+}
+
+#[test]
+fn test_is_square_attacked_king() {
+    let mut board = Board::empty();
+    board.set_piece(Square::C3, Some(Piece::new(Color::Black, PieceType::King)));
+
+    // Surrounding 8 squares are attacked by Black
+    assert!(is_square_attacked(&board, Square::B2, Color::Black));
+    assert!(is_square_attacked(&board, Square::C2, Color::Black));
+    assert!(is_square_attacked(&board, Square::D2, Color::Black));
+    assert!(is_square_attacked(&board, Square::B3, Color::Black));
+    assert!(is_square_attacked(&board, Square::D3, Color::Black));
+    assert!(is_square_attacked(&board, Square::B4, Color::Black));
+    assert!(is_square_attacked(&board, Square::C4, Color::Black));
+    assert!(is_square_attacked(&board, Square::D4, Color::Black));
+
+    // Distance 2 squares are NOT attacked
+    assert!(!is_square_attacked(&board, Square::A1, Color::Black));
+    assert!(!is_square_attacked(&board, Square::C1, Color::Black));
+}
+
+#[test]
+fn test_is_square_attacked_sliding_and_blockers() {
+    let mut board = Board::empty();
+    // White Rook on C1
+    board.set_piece(Square::C1, Some(Piece::new(Color::White, PieceType::Rook)));
+
+    // Open ray reaches C2..C5
+    assert!(is_square_attacked(&board, Square::C2, Color::White));
+    assert!(is_square_attacked(&board, Square::C3, Color::White));
+    assert!(is_square_attacked(&board, Square::C4, Color::White));
+    assert!(is_square_attacked(&board, Square::C5, Color::White));
+
+    // Put obstacle on C3
+    board.set_piece(Square::C3, Some(Piece::new(Color::Black, PieceType::Pawn)));
+
+    // C2 is open, C3 is the obstacle itself (attacked!)
+    assert!(is_square_attacked(&board, Square::C2, Color::White));
+    assert!(is_square_attacked(&board, Square::C3, Color::White));
+
+    // C4 and C5 are blocked behind C3
+    assert!(!is_square_attacked(&board, Square::C4, Color::White));
+    assert!(!is_square_attacked(&board, Square::C5, Color::White));
+
+    // White Bishop on A1
+    board.set_piece(
+        Square::A1,
+        Some(Piece::new(Color::White, PieceType::Bishop)),
+    );
+    // Open ray reaches B2, C3 (now blocked)
+    assert!(is_square_attacked(&board, Square::B2, Color::White));
+    assert!(is_square_attacked(&board, Square::C3, Color::White));
+    // D4 and E5 are blocked behind C3
+    assert!(!is_square_attacked(&board, Square::D4, Color::White));
+    assert!(!is_square_attacked(&board, Square::E5, Color::White));
+
+    // White Queen on E3
+    board.set_piece(Square::E3, Some(Piece::new(Color::White, PieceType::Queen)));
+    // Queen attacks orthogonal and diagonal
+    assert!(is_square_attacked(&board, Square::D3, Color::White));
+    assert!(is_square_attacked(&board, Square::E4, Color::White));
+    assert!(is_square_attacked(&board, Square::D4, Color::White));
+    assert!(is_square_attacked(&board, Square::D2, Color::White));
+}
+
+#[test]
+fn test_is_square_attacked_gardner_initial() {
+    let board = Board::gardner_initial();
+
+    // Neither king should be in check in the starting position
+    assert!(!is_square_attacked(&board, Square::E1, Color::Black));
+    assert!(!is_square_attacked(&board, Square::E5, Color::White));
+
+    // Center square C3 is attacked by White knights (B1, D1) and Black knights (B5, D5)
+    assert!(is_square_attacked(&board, Square::C3, Color::White));
+    assert!(is_square_attacked(&board, Square::C3, Color::Black));
+
+    // A3 is attacked by knight at B1 (White) and B5 (Black)
+    assert!(is_square_attacked(&board, Square::A3, Color::White));
+    assert!(is_square_attacked(&board, Square::A3, Color::Black));
+
+    // Pawns on rank 2 protect each other diagonally on rank 3
+    // E.g. White pawn at B2 attacks A3 and C3
+    assert!(is_square_attacked(&board, Square::A3, Color::White));
+    assert!(is_square_attacked(&board, Square::C3, Color::White));
 }

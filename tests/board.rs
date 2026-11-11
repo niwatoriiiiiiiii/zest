@@ -203,3 +203,40 @@ fn test_make_move_empty_source_is_noop() {
 
     assert_eq!(board, before);
 }
+
+#[test]
+fn test_board_occupied() {
+    let empty = Board::empty();
+    assert!(empty.occupied().is_empty());
+    assert_eq!(empty.occupied().count(), 0);
+
+    let initial = Board::gardner_initial();
+    assert_eq!(initial.occupied().count(), 20);
+
+    // Rank 3 (A3..E3) is entirely empty in initial position
+    assert!(!initial.occupied().contains(Square::A3));
+    assert!(!initial.occupied().contains(Square::B3));
+    assert!(!initial.occupied().contains(Square::C3));
+    assert!(!initial.occupied().contains(Square::D3));
+    assert!(!initial.occupied().contains(Square::E3));
+
+    // Rank 1 and 2 are occupied
+    assert!(initial.occupied().contains(Square::A1));
+    assert!(initial.occupied().contains(Square::C2));
+
+    // Moving a piece updates occupied bitboard
+    let mut board = initial;
+    let m = Move::new(Square::C2, Square::C3, None);
+    board.make_move(m);
+
+    assert!(!board.occupied().contains(Square::C2));
+    assert!(board.occupied().contains(Square::C3));
+    assert_eq!(board.occupied().count(), 20);
+
+    // Capture reduces occupied count
+    let capture_move = Move::new(Square::D4, Square::C3, None);
+    board.make_move(capture_move);
+    assert!(!board.occupied().contains(Square::D4));
+    assert!(board.occupied().contains(Square::C3));
+    assert_eq!(board.occupied().count(), 19);
+}
