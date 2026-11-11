@@ -1,53 +1,66 @@
 use crate::core::Square;
 
+/// Represents a 5x5 board state as a 25-bit mask in a `u32`.
 #[derive(Clone, Copy, PartialEq, Eq, Debug, Default, Hash)]
 pub struct Bitboard(u32);
 
 impl Bitboard {
+    /// An empty bitboard with no squares set.
     pub const EMPTY: Self = Self(0);
+
+    /// A bitboard with all 25 squares set.
     pub const ALL: Self = Self((1 << 25) - 1);
 
+    /// Creates an empty bitboard.
     #[must_use]
     pub const fn empty() -> Self {
         Self(0)
     }
 
+    /// Creates a bitboard with only the given `sq` set.
     #[must_use]
     pub const fn from_square(sq: Square) -> Self {
         Self(1u32 << sq.index())
     }
 
+    /// Returns `true` if the given `sq` is set in the bitboard.
     #[must_use]
     pub const fn contains(self, sq: Square) -> bool {
         // AND(self.0, mask) != 0
         (self.0 & (1u32 << sq.index())) != 0
     }
 
+    /// Returns `true` if no squares are set in the bitboard.
     #[must_use]
     pub const fn is_empty(self) -> bool {
         self.0 == 0
     }
 
+    /// Returns the number of set squares in the bitboard.
     #[must_use]
     pub const fn count(self) -> u32 {
         self.0.count_ones()
     }
 
+    /// Sets the bit corresponding to the given `sq`.
     pub const fn set(&mut self, sq: Square) {
         // self.0 = OR(self.0, mask)
         self.0 |= 1u32 << sq.index();
     }
 
+    /// Clears the bit corresponding to the given `sq`.
     pub const fn clear(&mut self, sq: Square) {
         // self.0 = AND(self.0, NOT(mask))
         self.0 &= !(1u32 << sq.index());
     }
 
+    /// Toggles the bit corresponding to the given `sq`.
     pub const fn toggle(&mut self, sq: Square) {
         // self.0 = XOR(self.0, mask)
         self.0 ^= 1u32 << sq.index();
     }
 
+    /// Removes and returns the square of the least significant bit, or `None` if empty.
     pub const fn pop_lsb(&mut self) -> Option<Square> {
         if self.is_empty() {
             return None;
