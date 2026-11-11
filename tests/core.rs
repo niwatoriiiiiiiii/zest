@@ -65,3 +65,19 @@ fn test_piece_char() {
     assert_eq!(white_pawn.color, Color::White);
     assert_eq!(white_pawn.piece_type, PieceType::Pawn);
 }
+
+#[test]
+fn test_square_display() {
+    assert_eq!(format!("{}", Square::A1), "a1");
+    assert_eq!(format!("{}", Square::C3), "c3");
+    assert_eq!(format!("{}", Square::E5), "e5");
+
+    let expected_names = [
+        "a1", "b1", "c1", "d1", "e1", "a2", "b2", "c2", "d2", "e2", "a3", "b3", "c3", "d3", "e3",
+        "a4", "b4", "c4", "d4", "e4", "a5", "b5", "c5", "d5", "e5",
+    ];
+
+    for (i, &sq) in Square::ALL.iter().enumerate() {
+        assert_eq!(format!("{sq}"), expected_names[i]);
+    }
+}

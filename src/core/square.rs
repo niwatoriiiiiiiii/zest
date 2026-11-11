@@ -86,3 +86,12 @@ impl Square {
         self.0
     }
 }
+
+impl std::fmt::Display for Square {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let file_char = (b'a' + self.file()) as char;
+        let rank_char = (b'1' + self.rank()) as char;
+
+        write!(f, "{file_char}{rank_char}")
+    }
+}

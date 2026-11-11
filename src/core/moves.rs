@@ -37,3 +37,14 @@ impl Move {
         self.promotion
     }
 }
+
+impl std::fmt::Display for Move {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}{}", self.from, self.to)?;
+        if let Some(piece_type) = self.promotion {
+            write!(f, "{}", piece_type.to_char())?;
+        }
+
+        Ok(())
+    }
+}

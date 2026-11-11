@@ -52,3 +52,21 @@ fn test_move_copy() {
 
     assert_eq!(m1, m2);
 }
+
+#[test]
+fn test_move_display() {
+    let normal_move = Move::new(Square::A2, Square::A3, None);
+    assert_eq!(format!("{normal_move}"), "a2a3");
+
+    let promo_queen = Move::new(Square::E4, Square::E5, Some(PieceType::Queen));
+    assert_eq!(format!("{promo_queen}"), "e4e5q");
+
+    let promo_knight = Move::new(Square::C4, Square::C5, Some(PieceType::Knight));
+    assert_eq!(format!("{promo_knight}"), "c4c5n");
+
+    let promo_rook = Move::new(Square::B4, Square::B5, Some(PieceType::Rook));
+    assert_eq!(format!("{promo_rook}"), "b4b5r");
+
+    let promo_bishop = Move::new(Square::D4, Square::D5, Some(PieceType::Bishop));
+    assert_eq!(format!("{promo_bishop}"), "d4d5b");
+}
