@@ -125,3 +125,26 @@ fn test_board_equality_and_copy() {
     assert_ne!(board1, board2);
     assert_eq!(board1.piece_at(Square::C3), None);
 }
+
+#[test]
+fn test_board_display() {
+    let board = Board::gardner_initial();
+    let display_str = format!("{board}");
+
+    let expected = concat!(
+        " +---+---+---+---+---+\n",
+        " | r | n | b | q | k | 5\n",
+        " +---+---+---+---+---+\n",
+        " | p | p | p | p | p | 4\n",
+        " +---+---+---+---+---+\n",
+        " |   |   |   |   |   | 3\n",
+        " +---+---+---+---+---+\n",
+        " | P | P | P | P | P | 2\n",
+        " +---+---+---+---+---+\n",
+        " | R | N | B | Q | K | 1\n",
+        " +---+---+---+---+---+\n",
+        "   a   b   c   d   e\n",
+    );
+
+    assert_eq!(display_str, expected);
+}

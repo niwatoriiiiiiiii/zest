@@ -1,5 +1,6 @@
 //! Zest CLI entry point.
 
+use zest::board::Board;
 use zest::core::{Color, PieceType, Square};
 
 fn main() {
@@ -8,4 +9,7 @@ fn main() {
     println!("Color: {:?}, Opposite: {:?}", c, c.opposite());
     println!("Square: {:?} (file={}, rank={})", sq, sq.file(), sq.rank());
     println!("Piece: {}", PieceType::Pawn.to_char());
+
+    let board = Board::gardner_initial();
+    println!("{board}");
 }
