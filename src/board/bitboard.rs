@@ -1,4 +1,4 @@
-use core::ops::BitOr;
+use core::ops::{BitAnd, BitOr, BitXor, Not};
 
 use crate::core::Square;
 
@@ -96,5 +96,29 @@ impl BitOr for Bitboard {
 
     fn bitor(self, rhs: Self) -> Self::Output {
         Self(self.0 | rhs.0)
+    }
+}
+
+impl BitAnd for Bitboard {
+    type Output = Self;
+
+    fn bitand(self, rhs: Self) -> Self::Output {
+        Self(self.0 & rhs.0)
+    }
+}
+
+impl BitXor for Bitboard {
+    type Output = Self;
+
+    fn bitxor(self, rhs: Self) -> Self::Output {
+        Self(self.0 ^ rhs.0)
+    }
+}
+
+impl Not for Bitboard {
+    type Output = Self;
+
+    fn not(self) -> Self::Output {
+        Self(!self.0 & ((1 << 25) - 1))
     }
 }
