@@ -133,3 +133,17 @@ fn test_bitboard_bitor() {
     assert!(combined.contains(Square::E5));
     assert!(!combined.contains(Square::B2));
 }
+
+#[test]
+fn test_bitboard_from_raw_and_as_raw() {
+    let bb = Bitboard::from_raw(0b101);
+    assert_eq!(bb.as_raw(), 0b101);
+    assert!(bb.contains(Square::A1));
+    assert!(!bb.contains(Square::B1));
+    assert!(bb.contains(Square::C1));
+
+    // Bits beyond 25 should be masked out
+    let overflow = Bitboard::from_raw(u32::MAX);
+    assert_eq!(overflow.as_raw(), (1 << 25) - 1);
+    assert_eq!(overflow, Bitboard::ALL);
+}
