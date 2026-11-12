@@ -22,8 +22,18 @@ pub fn generate_legal_moves(board: &Board) -> MoveList {
     let check_info = CheckInfo::compute(board, us, my_king_sq);
     let num_checkers = check_info.checkers.count();
 
+    let mut friendly_bb = Bitboard::EMPTY;
+    for &sq in &Square::ALL {
+        if let Some(piece) = board.piece_at(sq)
+            && piece.color == us
+        {
+            friendly_bb.set(sq);
+        }
+    }
+    let not_friendly = !friendly_bb;
+
     // King moves are verified against check
-    generate_king_moves(&mut moves, board, my_king_sq, us);
+    generate_king_moves(&mut moves, board, my_king_sq, us, not_friendly);
 
     // If double check, ONLY king moves can escape
     if num_checkers >= 2 {
@@ -62,56 +72,35 @@ pub fn generate_legal_moves(board: &Board) -> MoveList {
                 continue;
             }
 
-            let legal_target_mask = check_mask & allowed_ray;
+            let legal_target_mask = check_mask & allowed_ray & not_friendly;
 
             match piece.piece_type {
                 PieceType::Knight => {
                     // Pinned knight can never move along linear pin ray
-                    if is_pinned {
-                        continue;
-                    }
-                    let mut targets = knight_attacks(sq) & legal_target_mask;
-                    while let Some(to) = targets.pop_lsb() {
-                        if let Some(target_piece) = board.piece_at(to)
-                            && target_piece.color == us
-                        {
-                            continue;
-                        }
-                        moves.push(Move::new(sq, to, None));
+                    if !is_pinned {
+                        push_moves(&mut moves, sq, knight_attacks(sq) & legal_target_mask);
                     }
                 }
                 PieceType::Bishop => {
-                    let mut targets = bishop_attacks(sq, board.occupied()) & legal_target_mask;
-                    while let Some(to) = targets.pop_lsb() {
-                        if let Some(target_piece) = board.piece_at(to)
-                            && target_piece.color == us
-                        {
-                            continue;
-                        }
-                        moves.push(Move::new(sq, to, None));
-                    }
+                    push_moves(
+                        &mut moves,
+                        sq,
+                        bishop_attacks(sq, board.occupied()) & legal_target_mask,
+                    );
                 }
                 PieceType::Rook => {
-                    let mut targets = rook_attacks(sq, board.occupied()) & legal_target_mask;
-                    while let Some(to) = targets.pop_lsb() {
-                        if let Some(target_piece) = board.piece_at(to)
-                            && target_piece.color == us
-                        {
-                            continue;
-                        }
-                        moves.push(Move::new(sq, to, None));
-                    }
+                    push_moves(
+                        &mut moves,
+                        sq,
+                        rook_attacks(sq, board.occupied()) & legal_target_mask,
+                    );
                 }
                 PieceType::Queen => {
-                    let mut targets = queen_attacks(sq, board.occupied()) & legal_target_mask;
-                    while let Some(to) = targets.pop_lsb() {
-                        if let Some(target_piece) = board.piece_at(to)
-                            && target_piece.color == us
-                        {
-                            continue;
-                        }
-                        moves.push(Move::new(sq, to, None));
-                    }
+                    push_moves(
+                        &mut moves,
+                        sq,
+                        queen_attacks(sq, board.occupied()) & legal_target_mask,
+                    );
                 }
                 PieceType::Pawn => {
                     generate_pawn_moves(&mut moves, board, sq, us, legal_target_mask);
@@ -124,15 +113,21 @@ pub fn generate_legal_moves(board: &Board) -> MoveList {
     moves
 }
 
-fn generate_king_moves(moves: &mut MoveList, board: &Board, king_sq: Square, us: Color) {
-    let mut targets = king_attacks(king_sq);
+fn push_moves(moves: &mut MoveList, from: Square, mut targets: Bitboard) {
     while let Some(to) = targets.pop_lsb() {
-        if let Some(target_piece) = board.piece_at(to)
-            && target_piece.color == us
-        {
-            continue;
-        }
+        moves.push(Move::new(from, to, None));
+    }
+}
 
+fn generate_king_moves(
+    moves: &mut MoveList,
+    board: &Board,
+    king_sq: Square,
+    us: Color,
+    not_friendly: Bitboard,
+) {
+    let mut targets = king_attacks(king_sq) & not_friendly;
+    while let Some(to) = targets.pop_lsb() {
         let m = Move::new(king_sq, to, None);
         let mut next_board = *board;
         next_board.make_move(m);
