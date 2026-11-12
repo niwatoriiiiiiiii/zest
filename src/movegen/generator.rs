@@ -1,8 +1,8 @@
 use crate::board::Board;
 use crate::core::{Color, Move, Piece, PieceType, Square};
 use crate::movegen::{
-    bishop_attacks, is_square_attacked, king_attacks, knight_attacks, pawn_attacks, queen_attacks,
-    rook_attacks,
+    MoveList, bishop_attacks, is_square_attacked, king_attacks, knight_attacks, pawn_attacks,
+    queen_attacks, rook_attacks,
 };
 
 /// Generates all legal moves for the current player (`side_to_move`).
@@ -10,8 +10,8 @@ use crate::movegen::{
 /// This first generates all pseudo-legal moves for the player's pieces,
 /// and then filters out any move that leaves their own king in check.
 #[must_use]
-pub fn generate_legal_moves(board: &Board) -> Vec<Move> {
-    let mut moves = Vec::new();
+pub fn generate_legal_moves(board: &Board) -> MoveList {
+    let mut moves = MoveList::new();
     let us = board.side_to_move();
 
     for &sq in &Square::ALL {
@@ -61,7 +61,7 @@ pub fn generate_legal_moves(board: &Board) -> Vec<Move> {
     moves
 }
 
-fn generate_pawn_moves(moves: &mut Vec<Move>, board: &Board, sq: Square, us: Color) {
+fn generate_pawn_moves(moves: &mut MoveList, board: &Board, sq: Square, us: Color) {
     let forward_rank = match us {
         Color::White => sq.rank().cast_signed() + 1,
         Color::Black => sq.rank().cast_signed() - 1,
@@ -83,7 +83,7 @@ fn generate_pawn_moves(moves: &mut Vec<Move>, board: &Board, sq: Square, us: Col
     }
 }
 
-fn push_pawn_move(moves: &mut Vec<Move>, from: Square, to: Square, us: Color) {
+fn push_pawn_move(moves: &mut MoveList, from: Square, to: Square, us: Color) {
     let is_promo = match us {
         Color::White => to.rank() == 4,
         Color::Black => to.rank() == 0,
