@@ -1,4 +1,4 @@
-use core::ops::BitOr;
+use core::ops::{BitAnd, BitOr, BitXor, Not};
 
 use crate::core::Square;
 
@@ -78,6 +78,18 @@ impl Bitboard {
 
         sq
     }
+
+    /// Creates a bitboard from a raw `u32` value (masked to 25 bits).
+    #[must_use]
+    pub const fn from_raw(raw: u32) -> Self {
+        Self(raw & ((1 << 25) - 1))
+    }
+
+    /// Returns the raw `u32` bitmask of the bitboard.
+    #[must_use]
+    pub const fn as_raw(self) -> u32 {
+        self.0
+    }
 }
 
 impl BitOr for Bitboard {
@@ -85,5 +97,29 @@ impl BitOr for Bitboard {
 
     fn bitor(self, rhs: Self) -> Self::Output {
         Self(self.0 | rhs.0)
+    }
+}
+
+impl BitAnd for Bitboard {
+    type Output = Self;
+
+    fn bitand(self, rhs: Self) -> Self::Output {
+        Self(self.0 & rhs.0)
+    }
+}
+
+impl BitXor for Bitboard {
+    type Output = Self;
+
+    fn bitxor(self, rhs: Self) -> Self::Output {
+        Self(self.0 ^ rhs.0)
+    }
+}
+
+impl Not for Bitboard {
+    type Output = Self;
+
+    fn not(self) -> Self::Output {
+        Self(!self.0 & ((1 << 25) - 1))
     }
 }

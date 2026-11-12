@@ -16,7 +16,7 @@ pub fn perft(board: &Board, depth: usize) -> u64 {
     }
 
     let mut nodes = 0;
-    for m in moves {
+    for &m in moves.iter() {
         let mut next_board = *board;
         next_board.make_move(m);
         nodes += perft(&next_board, depth - 1);
