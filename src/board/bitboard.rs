@@ -84,6 +84,7 @@ impl Bitboard {
     pub const fn from_raw(raw: u32) -> Self {
         Self(raw & ((1 << 25) - 1))
     }
+
     /// Returns the raw `u32` bitmask of the bitboard.
     #[must_use]
     pub const fn as_raw(self) -> u32 {
