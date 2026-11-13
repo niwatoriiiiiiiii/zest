@@ -17,6 +17,15 @@ impl Color {
             Self::Black => Self::White,
         }
     }
+
+    /// Returns the array index (`0` for white, `1` for black) for this color.
+    #[must_use]
+    pub const fn index(self) -> usize {
+        match self {
+            Self::White => 0,
+            Self::Black => 1,
+        }
+    }
 }
 
 impl std::ops::Not for Color {

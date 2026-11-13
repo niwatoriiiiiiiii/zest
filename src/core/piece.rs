@@ -35,6 +35,19 @@ impl PieceType {
             Self::King => 'k',
         }
     }
+
+    /// Returns the array index (`0..=5`) for this piece type.
+    #[must_use]
+    pub const fn index(self) -> usize {
+        match self {
+            Self::Pawn => 0,
+            Self::Knight => 1,
+            Self::Bishop => 2,
+            Self::Rook => 3,
+            Self::Queen => 4,
+            Self::King => 5,
+        }
+    }
 }
 
 /// A piece in Gardner minichess.

@@ -1,4 +1,4 @@
-use crate::board::Bitboard;
+use crate::board::{Bitboard, ZobristKeys};
 use crate::core::{Color, Move, Piece, PieceType, Square};
 
 /// Represents the state of a 5x5 Gardner minichess board.
@@ -7,6 +7,7 @@ pub struct Board {
     pieces: [Option<Piece>; 25],
     occupied: Bitboard,
     side_to_move: Color,
+    key: u64,
 }
 
 impl Board {
@@ -17,6 +18,7 @@ impl Board {
             pieces: [None; 25],
             occupied: Bitboard::EMPTY,
             side_to_move: Color::White,
+            key: 0,
         }
     }
 
@@ -28,9 +30,15 @@ impl Board {
 
     /// Places a `piece` on the given `sq`, or clears the square if `piece` is `None`.
     pub const fn set_piece(&mut self, sq: Square, piece: Option<Piece>) {
+        if let Some(old_piece) = self.pieces[sq.index()] {
+            self.key ^= ZobristKeys::piece_key(old_piece, sq);
+        }
+
         self.pieces[sq.index()] = piece;
-        if piece.is_some() {
+
+        if let Some(new_piece) = piece {
             self.occupied.set(sq);
+            self.key ^= ZobristKeys::piece_key(new_piece, sq);
         } else {
             self.occupied.clear(sq);
         }
@@ -103,12 +111,19 @@ impl Board {
         self.set_piece(m.to(), Some(piece));
 
         self.side_to_move = !self.side_to_move;
+        self.key ^= ZobristKeys::side_to_move_key();
     }
 
     /// Returns a bitboard of all occupied squares on the board.
     #[must_use]
     pub const fn occupied(self) -> Bitboard {
         self.occupied
+    }
+
+    /// Returns the Zobrist hash key for the current position.
+    #[must_use]
+    pub const fn key(self) -> u64 {
+        self.key
     }
 }
 
@@ -130,8 +145,10 @@ impl std::fmt::Display for Board {
 
         writeln!(f, " +---+---+---+---+---+")?;
         writeln!(f, "   a   b   c   d   e")?;
+        writeln!(f)?;
+        writeln!(f, "Key: {:016X}", self.key)?;
 
-        // TODO: Add Fen: Key: Checkers:
+        // TODO: Add Fen: Checkers:
 
         Ok(())
     }
