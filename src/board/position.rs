@@ -163,31 +163,3 @@ impl Board {
         self.key
     }
 }
-
-impl std::fmt::Display for Board {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        for rank in (0..5).rev() {
-            writeln!(f, " +---+---+---+---+---+")?;
-
-            write!(f, " |")?;
-            for file in 0..5 {
-                if let Some(sq) = Square::new(file, rank) {
-                    let ch = self.piece_at(sq).map_or(' ', Piece::to_char);
-                    write!(f, " {ch} |")?;
-                }
-            }
-
-            writeln!(f, " {}", rank + 1)?;
-        }
-
-        writeln!(f, " +---+---+---+---+---+")?;
-        writeln!(f, "   a   b   c   d   e")?;
-        writeln!(f)?;
-        writeln!(f, "Fen: {}", self.to_fen())?;
-        writeln!(f, "Key: {:016X}", self.key)?;
-
-        // TODO: Add Checkers:
-
-        Ok(())
-    }
-}

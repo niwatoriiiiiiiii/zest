@@ -147,6 +147,7 @@ fn test_board_display() {
             "   a   b   c   d   e\n",
             "\nFen: rnbqk/ppppp/5/PPPPP/RNBQK w - - 0 1\n",
             "Key: {:016X}\n",
+            "Checkers: \n",
         ),
         board.key()
     );
@@ -284,4 +285,33 @@ fn test_board_color_and_piece_type_bitboards() {
     assert!(!board.color_bb(Color::Black).contains(Square::B5));
     assert_eq!(board.pieces_bb(Color::Black, PieceType::Rook).count(), 1);
     assert_eq!(board.pieces_bb(Color::White, PieceType::Queen).count(), 2);
+}
+
+#[test]
+fn test_board_display_with_checkers() {
+    let board = Board::from_fen("4k/5/2qn1/5/4K w - - 0 1").expect("valid check FEN");
+    let display_str = format!("{board}");
+
+    let expected = format!(
+        concat!(
+            " +---+---+---+---+---+\n",
+            " |   |   |   |   | k | 5\n",
+            " +---+---+---+---+---+\n",
+            " |   |   |   |   |   | 4\n",
+            " +---+---+---+---+---+\n",
+            " |   |   | q | n |   | 3\n",
+            " +---+---+---+---+---+\n",
+            " |   |   |   |   |   | 2\n",
+            " +---+---+---+---+---+\n",
+            " |   |   |   |   | K | 1\n",
+            " +---+---+---+---+---+\n",
+            "   a   b   c   d   e\n",
+            "\nFen: 4k/5/2qn1/5/4K w - - 0 1\n",
+            "Key: {:016X}\n",
+            "Checkers: c3 d3\n",
+        ),
+        board.key()
+    );
+
+    assert_eq!(display_str, expected);
 }

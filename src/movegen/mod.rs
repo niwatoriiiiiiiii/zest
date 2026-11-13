@@ -6,8 +6,8 @@ mod magic;
 mod movelist;
 
 pub use attacks::{
-    is_square_attacked, is_square_attacked_with_occupied, king_attacks, knight_attacks,
-    pawn_attacks,
+    attackers_to, attackers_to_with_occupied, checkers, in_check, is_square_attacked,
+    is_square_attacked_with_occupied, king_attacks, knight_attacks, pawn_attacks,
 };
 pub use between::between;
 pub use check_info::CheckInfo;

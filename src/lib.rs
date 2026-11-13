@@ -8,3 +8,5 @@ pub mod board;
 
 /// Move generation and attack tables for Gardner minichess.
 pub mod movegen;
+
+mod display;
