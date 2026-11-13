@@ -6,6 +6,8 @@ use crate::core::{Color, Move, Piece, PieceType, Square};
 pub struct Board {
     pieces: [Option<Piece>; 25],
     occupied: Bitboard,
+    colors: [Bitboard; 2],
+    piece_types: [Bitboard; 6],
     side_to_move: Color,
     key: u64,
 }
@@ -17,6 +19,8 @@ impl Board {
         Self {
             pieces: [None; 25],
             occupied: Bitboard::EMPTY,
+            colors: [Bitboard::EMPTY; 2],
+            piece_types: [Bitboard::EMPTY; 6],
             side_to_move: Color::White,
             key: 0,
         }
@@ -32,6 +36,8 @@ impl Board {
     pub const fn set_piece(&mut self, sq: Square, piece: Option<Piece>) {
         if let Some(old_piece) = self.pieces[sq.index()] {
             self.key ^= ZobristKeys::piece_key(old_piece, sq);
+            self.colors[old_piece.color.index()].clear(sq);
+            self.piece_types[old_piece.piece_type.index()].clear(sq);
         }
 
         self.pieces[sq.index()] = piece;
@@ -39,6 +45,8 @@ impl Board {
         if let Some(new_piece) = piece {
             self.occupied.set(sq);
             self.key ^= ZobristKeys::piece_key(new_piece, sq);
+            self.colors[new_piece.color.index()].set(sq);
+            self.piece_types[new_piece.piece_type.index()].set(sq);
         } else {
             self.occupied.clear(sq);
         }
@@ -118,6 +126,24 @@ impl Board {
     #[must_use]
     pub const fn occupied(self) -> Bitboard {
         self.occupied
+    }
+
+    /// Returns a bitboard of all squares occupied by pieces of `color`.
+    #[must_use]
+    pub const fn color_bb(self, color: Color) -> Bitboard {
+        self.colors[color.index()]
+    }
+
+    /// Returns a bitboard of all squares occupied by pieces of `piece_type` (both colors).
+    #[must_use]
+    pub const fn piece_type_bb(self, piece_type: PieceType) -> Bitboard {
+        self.piece_types[piece_type.index()]
+    }
+
+    /// Returns a bitboard of all squares occupied by pieces of `color` and `piece_type`.
+    #[must_use]
+    pub const fn pieces_bb(self, color: Color, piece_type: PieceType) -> Bitboard {
+        self.colors[color.index()].and(self.piece_types[piece_type.index()])
     }
 
     /// Returns the Zobrist hash key for the current position.

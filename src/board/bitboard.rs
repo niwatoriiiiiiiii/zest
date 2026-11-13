@@ -79,6 +79,31 @@ impl Bitboard {
         sq
     }
 
+    /// Returns the square of the least significant set bit without modifying `self`, or `None` if empty.
+    #[must_use]
+    pub const fn lsb(self) -> Option<Square> {
+        if self.is_empty() {
+            return None;
+        }
+
+        // NOTE: `trailing_zeros()` on `u32` returns at most 32, which always fits in `u8`.
+        #[allow(clippy::cast_possible_truncation)]
+        let index = self.0.trailing_zeros() as u8;
+        Square::from_index(index)
+    }
+
+    /// Returns the bitwise AND of `self` and `rhs` in a `const` context.
+    #[must_use]
+    pub const fn and(self, rhs: Self) -> Self {
+        Self(self.0 & rhs.0)
+    }
+
+    /// Returns `true` if `self` and `rhs` share at least one set square.
+    #[must_use]
+    pub const fn intersects(self, rhs: Self) -> bool {
+        (self.0 & rhs.0) != 0
+    }
+
     /// Creates a bitboard from a raw `u32` value (masked to 25 bits).
     #[must_use]
     pub const fn from_raw(raw: u32) -> Self {

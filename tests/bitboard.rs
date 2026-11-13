@@ -147,3 +147,25 @@ fn test_bitboard_from_raw_and_as_raw() {
     assert_eq!(overflow.as_raw(), (1 << 25) - 1);
     assert_eq!(overflow, Bitboard::ALL);
 }
+
+#[test]
+fn test_bitboard_lsb_and_and_intersects() {
+    assert_eq!(Bitboard::EMPTY.lsb(), None);
+
+    let mut bb1 = Bitboard::EMPTY;
+    bb1.set(Square::C2);
+    bb1.set(Square::E4);
+    assert_eq!(bb1.lsb(), Some(Square::C2));
+    assert_eq!(bb1.count(), 2); // lsb does not mutate
+
+    let mut bb2 = Bitboard::EMPTY;
+    bb2.set(Square::A1);
+    bb2.set(Square::E4);
+
+    assert!(bb1.intersects(bb2));
+    assert_eq!(bb1.and(bb2), Bitboard::from_square(Square::E4));
+
+    let bb3 = Bitboard::from_square(Square::A5);
+    assert!(!bb1.intersects(bb3));
+    assert_eq!(bb1.and(bb3), Bitboard::EMPTY);
+}

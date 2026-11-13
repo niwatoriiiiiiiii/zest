@@ -1,5 +1,5 @@
 use crate::board::{Bitboard, Board};
-use crate::core::{Color, Move, Piece, PieceType, Square};
+use crate::core::{Color, Move, PieceType, Square};
 use crate::movegen::{
     CheckInfo, MoveList, between, bishop_attacks, is_square_attacked_with_occupied, king_attacks,
     knight_attacks, pawn_attacks, queen_attacks, rook_attacks,
@@ -18,18 +18,14 @@ pub fn generate_legal_moves(board: &Board) -> MoveList {
     let mut moves = MoveList::new();
     let us = board.side_to_move();
 
-    let my_king_sq = find_king(board, us).expect("King must exist");
+    let my_king_sq = board
+        .pieces_bb(us, PieceType::King)
+        .lsb()
+        .expect("King must exist");
     let check_info = CheckInfo::compute(board, us, my_king_sq);
     let num_checkers = check_info.checkers.count();
 
-    let mut friendly_bb = Bitboard::EMPTY;
-    for &sq in &Square::ALL {
-        if let Some(piece) = board.piece_at(sq)
-            && piece.color == us
-        {
-            friendly_bb.set(sq);
-        }
-    }
+    let friendly_bb = board.color_bb(us);
     let not_friendly = !friendly_bb;
 
     // King moves are verified against check
@@ -171,11 +167,4 @@ fn push_pawn_move(moves: &mut MoveList, from: Square, to: Square, us: Color) {
     } else {
         moves.push(Move::new(from, to, None));
     }
-}
-
-fn find_king(board: &Board, color: Color) -> Option<Square> {
-    Square::ALL
-        .iter()
-        .find(|&&sq| board.piece_at(sq) == Some(Piece::new(color, PieceType::King)))
-        .copied()
 }

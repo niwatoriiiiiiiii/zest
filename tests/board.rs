@@ -244,3 +244,43 @@ fn test_board_occupied() {
     assert!(board.occupied().contains(Square::C3));
     assert_eq!(board.occupied().count(), 19);
 }
+
+#[test]
+fn test_board_color_and_piece_type_bitboards() {
+    use zest::board::Bitboard;
+
+    let mut board = Board::gardner_initial();
+    assert_eq!(board.color_bb(Color::White).count(), 10);
+    assert_eq!(board.color_bb(Color::Black).count(), 10);
+    assert_eq!(
+        board.color_bb(Color::White) | board.color_bb(Color::Black),
+        board.occupied()
+    );
+    assert_eq!(board.piece_type_bb(PieceType::Pawn).count(), 10);
+    assert_eq!(
+        board.pieces_bb(Color::White, PieceType::King),
+        Bitboard::from_square(Square::E1)
+    );
+    assert_eq!(
+        board.pieces_bb(Color::Black, PieceType::Queen),
+        Bitboard::from_square(Square::D5)
+    );
+
+    // Promote white pawn at A4 capturing black rook at B5
+    board.set_piece(Square::A4, Some(Piece::new(Color::White, PieceType::Pawn)));
+    board.make_move(Move::new(Square::A4, Square::B5, Some(PieceType::Queen)));
+
+    assert!(
+        board
+            .pieces_bb(Color::White, PieceType::Queen)
+            .contains(Square::B5)
+    );
+    assert!(
+        !board
+            .pieces_bb(Color::White, PieceType::Pawn)
+            .contains(Square::A4)
+    );
+    assert!(!board.color_bb(Color::Black).contains(Square::B5));
+    assert_eq!(board.pieces_bb(Color::Black, PieceType::Rook).count(), 1);
+    assert_eq!(board.pieces_bb(Color::White, PieceType::Queen).count(), 2);
+}
