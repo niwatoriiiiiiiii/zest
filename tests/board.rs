@@ -145,7 +145,8 @@ fn test_board_display() {
             " | R | N | B | Q | K | 1\n",
             " +---+---+---+---+---+\n",
             "   a   b   c   d   e\n",
-            "\nKey: {:016X}\n",
+            "\nFen: rnbqk/ppppp/5/PPPPP/RNBQK w - - 0 1\n",
+            "Key: {:016X}\n",
         ),
         board.key()
     );

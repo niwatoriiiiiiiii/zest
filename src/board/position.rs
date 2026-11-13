@@ -52,6 +52,17 @@ impl Board {
         }
     }
 
+    /// Sets the side to move, updating the Zobrist hash key if it changes.
+    pub const fn set_side_to_move(&mut self, color: Color) {
+        if !matches!(
+            (self.side_to_move, color),
+            (Color::White, Color::White) | (Color::Black, Color::Black)
+        ) {
+            self.side_to_move = color;
+            self.key ^= ZobristKeys::side_to_move_key();
+        }
+    }
+
     /// Returns the side to move for the current position.
     #[must_use]
     pub const fn side_to_move(self) -> Color {
@@ -172,9 +183,10 @@ impl std::fmt::Display for Board {
         writeln!(f, " +---+---+---+---+---+")?;
         writeln!(f, "   a   b   c   d   e")?;
         writeln!(f)?;
+        writeln!(f, "Fen: {}", self.to_fen())?;
         writeln!(f, "Key: {:016X}", self.key)?;
 
-        // TODO: Add Fen: Checkers:
+        // TODO: Add Checkers:
 
         Ok(())
     }
