@@ -75,4 +75,24 @@ impl Piece {
             Color::Black => self.piece_type.to_char(),
         }
     }
+
+    /// Parses a piece from a FEN character (`'P'`..`'K'` for white, `'p'`..`'k'` for black).
+    #[must_use]
+    pub const fn from_char(ch: char) -> Option<Self> {
+        match ch {
+            'P' => Some(Self::new(Color::White, PieceType::Pawn)),
+            'N' => Some(Self::new(Color::White, PieceType::Knight)),
+            'B' => Some(Self::new(Color::White, PieceType::Bishop)),
+            'R' => Some(Self::new(Color::White, PieceType::Rook)),
+            'Q' => Some(Self::new(Color::White, PieceType::Queen)),
+            'K' => Some(Self::new(Color::White, PieceType::King)),
+            'p' => Some(Self::new(Color::Black, PieceType::Pawn)),
+            'n' => Some(Self::new(Color::Black, PieceType::Knight)),
+            'b' => Some(Self::new(Color::Black, PieceType::Bishop)),
+            'r' => Some(Self::new(Color::Black, PieceType::Rook)),
+            'q' => Some(Self::new(Color::Black, PieceType::Queen)),
+            'k' => Some(Self::new(Color::Black, PieceType::King)),
+            _ => None,
+        }
+    }
 }
