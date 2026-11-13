@@ -165,3 +165,37 @@ fn test_checkmate_has_no_legal_moves() {
     // White is checkmated: exactly 0 legal moves
     assert!(moves.is_empty());
 }
+
+#[test]
+fn test_king_cannot_retreat_along_xray_ray() {
+    let mut board = Board::empty();
+    // White King at C2 checked by Black Rook at C5 along C-file
+    board.set_piece(Square::C2, Some(Piece::new(Color::White, PieceType::King)));
+    board.set_piece(Square::C5, Some(Piece::new(Color::Black, PieceType::Rook)));
+    board.set_piece(Square::A5, Some(Piece::new(Color::Black, PieceType::King)));
+
+    let moves = generate_legal_moves(&board);
+
+    // Retreating to C1 is illegal because the king itself leaves C2 (X-ray check)
+    assert!(!moves.contains(&Move::new(Square::C2, Square::C1, None)));
+    assert!(!moves.contains(&Move::new(Square::C2, Square::C3, None)));
+
+    // Stepping off the C-file is legal
+    assert!(moves.contains(&Move::new(Square::C2, Square::B1, None)));
+    assert!(moves.contains(&Move::new(Square::C2, Square::D1, None)));
+}
+
+#[test]
+fn test_king_can_capture_unprotected_checker() {
+    let mut board = Board::empty();
+    board.set_piece(Square::C2, Some(Piece::new(Color::White, PieceType::King)));
+    board.set_piece(Square::C3, Some(Piece::new(Color::Black, PieceType::Queen)));
+    board.set_piece(Square::A5, Some(Piece::new(Color::Black, PieceType::King)));
+
+    let moves = generate_legal_moves(&board);
+
+    assert!(moves.contains(&Move::new(Square::C2, Square::C3, None)));
+    assert!(moves.contains(&Move::new(Square::C2, Square::B1, None)));
+    assert!(moves.contains(&Move::new(Square::C2, Square::D1, None)));
+    assert!(!moves.contains(&Move::new(Square::C2, Square::C1, None)));
+}

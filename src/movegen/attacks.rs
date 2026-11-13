@@ -27,9 +27,25 @@ const KING_MOVES: [(i8, i8); 8] = [
 const WHITE_PAWN_ATTACKS: [(i8, i8); 2] = [(1, 1), (-1, 1)];
 const BLACK_PAWN_ATTACKS: [(i8, i8); 2] = [(1, -1), (-1, -1)];
 
+const KNIGHT_ATTACKS_TABLE: [Bitboard; 25] = init_step_table(&KNIGHT_MOVES);
+const KING_ATTACKS_TABLE: [Bitboard; 25] = init_step_table(&KING_MOVES);
+const WHITE_PAWN_ATTACKS_TABLE: [Bitboard; 25] = init_step_table(&WHITE_PAWN_ATTACKS);
+const BLACK_PAWN_ATTACKS_TABLE: [Bitboard; 25] = init_step_table(&BLACK_PAWN_ATTACKS);
+
 /// Returns `true` if the given `sq` is attacked by any piece of `by_color`.
 #[must_use]
 pub fn is_square_attacked(board: &Board, sq: Square, by_color: Color) -> bool {
+    is_square_attacked_with_occupied(board, sq, by_color, board.occupied())
+}
+
+/// Returns `true` if `sq` is attacked by `by_color` using the provided `occupied` bitboard for sliders.
+#[must_use]
+pub fn is_square_attacked_with_occupied(
+    board: &Board,
+    sq: Square,
+    by_color: Color,
+    occupied: Bitboard,
+) -> bool {
     if has_attacker(
         board,
         pawn_attacks(sq, !by_color),
@@ -46,18 +62,13 @@ pub fn is_square_attacked(board: &Board, sq: Square, by_color: Color) -> bool {
     }
     if has_slider_attacker(
         board,
-        bishop_attacks(sq, board.occupied()),
+        bishop_attacks(sq, occupied),
         by_color,
         PieceType::Bishop,
     ) {
         return true;
     }
-    if has_slider_attacker(
-        board,
-        rook_attacks(sq, board.occupied()),
-        by_color,
-        PieceType::Rook,
-    ) {
+    if has_slider_attacker(board, rook_attacks(sq, occupied), by_color, PieceType::Rook) {
         return true;
     }
 
@@ -92,40 +103,54 @@ fn has_slider_attacker(
 
 /// Returns a bitboard of all squares attacked by a knight on the given `sq`.
 #[must_use]
-pub fn knight_attacks(sq: Square) -> Bitboard {
-    step_attacks(sq, &KNIGHT_MOVES)
+pub const fn knight_attacks(sq: Square) -> Bitboard {
+    KNIGHT_ATTACKS_TABLE[sq.index()]
 }
 
 /// Returns a bitboard of all squares attacked by a king on the given `sq`.
 #[must_use]
-pub fn king_attacks(sq: Square) -> Bitboard {
-    step_attacks(sq, &KING_MOVES)
+pub const fn king_attacks(sq: Square) -> Bitboard {
+    KING_ATTACKS_TABLE[sq.index()]
 }
 
 /// Returns a bitboard of all squares attacked by a pawn of the given `color` on the given `sq`.
 #[must_use]
-pub fn pawn_attacks(sq: Square, color: Color) -> Bitboard {
+pub const fn pawn_attacks(sq: Square, color: Color) -> Bitboard {
     match color {
-        Color::White => step_attacks(sq, &WHITE_PAWN_ATTACKS),
-        Color::Black => step_attacks(sq, &BLACK_PAWN_ATTACKS),
+        Color::White => WHITE_PAWN_ATTACKS_TABLE[sq.index()],
+        Color::Black => BLACK_PAWN_ATTACKS_TABLE[sq.index()],
     }
 }
 
-fn step_attacks(sq: Square, deltas: &[(i8, i8)]) -> Bitboard {
+const fn init_step_table(deltas: &[(i8, i8)]) -> [Bitboard; 25] {
+    let mut table = [Bitboard::EMPTY; 25];
+    let mut i = 0;
+    while i < 25 {
+        table[i] = step_attacks(Square::ALL[i], deltas);
+        i += 1;
+    }
+    table
+}
+
+const fn step_attacks(sq: Square, deltas: &[(i8, i8)]) -> Bitboard {
     let mut bb = Bitboard::empty();
     let file = sq.file().cast_signed();
     let rank = sq.rank().cast_signed();
 
-    for (df, dr) in deltas {
+    let mut i = 0;
+    while i < deltas.len() {
+        let (df, dr) = deltas[i];
         let to_f = file + df;
         let to_r = rank + dr;
 
-        if (0..5).contains(&to_f)
-            && (0..5).contains(&to_r)
+        if to_f >= 0
+            && to_r >= 0
             && let Some(target_sq) = Square::new(to_f.cast_unsigned(), to_r.cast_unsigned())
         {
             bb.set(target_sq);
         }
+
+        i += 1;
     }
 
     bb
