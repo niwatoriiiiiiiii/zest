@@ -150,4 +150,37 @@ fn test_from_fen_errors() {
         Board::from_fen("rnbqk/ppppp/5/PPPPP/RNBQK x - - 0 1"),
         Err(FenError::InvalidSideToMove)
     );
+
+    assert_eq!(
+        Board::from_fen("rnbqk/ppppp/5/PPPPP/RNBQK w - - -1 1"),
+        Err(FenError::InvalidHalfmoveClock)
+    );
+    assert_eq!(
+        Board::from_fen("rnbqk/ppppp/5/PPPPP/RNBQK w - - abc 1"),
+        Err(FenError::InvalidHalfmoveClock)
+    );
+    assert_eq!(
+        Board::from_fen("rnbqk/ppppp/5/PPPPP/RNBQK w - - 0 0"),
+        Err(FenError::InvalidFullmoveNumber)
+    );
+    assert_eq!(
+        Board::from_fen("rnbqk/ppppp/5/PPPPP/RNBQK w - - 0 xyz"),
+        Err(FenError::InvalidFullmoveNumber)
+    );
+}
+
+#[test]
+fn test_fen_with_clocks() {
+    let fen = "rnbqk/ppppp/5/PPPPP/RNBQK b - - 17 24";
+    let (board, halfmove, fullmove) =
+        Board::from_fen_with_clocks(fen).expect("valid FEN with clocks");
+    assert_eq!(halfmove, 17);
+    assert_eq!(fullmove, 24);
+    assert_eq!(board.side_to_move(), Color::Black);
+    assert_eq!(board.to_fen_with_clocks(halfmove, fullmove), fen);
+
+    let (_, default_halfmove, default_fullmove) =
+        Board::from_fen_with_clocks("rnbqk/ppppp/5/PPPPP/RNBQK w").expect("valid short FEN");
+    assert_eq!(default_halfmove, 0);
+    assert_eq!(default_fullmove, 1);
 }

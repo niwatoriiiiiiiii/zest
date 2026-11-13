@@ -62,6 +62,15 @@ impl Square {
         Self::new(index % 5, index / 5)
     }
 
+    /// Parses a square from a 2-byte ASCII algebraic coordinate (`"a1"`..`"e5"`).
+    #[must_use]
+    pub const fn from_ascii(bytes: &[u8]) -> Option<Self> {
+        match bytes {
+            [file @ b'a'..=b'e', rank @ b'1'..=b'5'] => Self::new(*file - b'a', *rank - b'1'),
+            _ => None,
+        }
+    }
+
     /// Returns the file of the square.
     #[must_use]
     pub const fn file(self) -> u8 {
@@ -93,5 +102,25 @@ impl std::fmt::Display for Square {
         let rank_char = (b'1' + self.rank()) as char;
 
         write!(f, "{file_char}{rank_char}")
+    }
+}
+
+/// Error returned when parsing a [`Square`] from an invalid algebraic string.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub struct ParseSquareError;
+
+impl std::fmt::Display for ParseSquareError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "invalid square coordinate (expected a1..e5)")
+    }
+}
+
+impl std::error::Error for ParseSquareError {}
+
+impl std::str::FromStr for Square {
+    type Err = ParseSquareError;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        Self::from_ascii(s.as_bytes()).ok_or(ParseSquareError)
     }
 }

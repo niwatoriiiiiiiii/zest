@@ -1,10 +1,10 @@
-use std::fmt;
+use std::fmt::{self, Write as _};
 
 use crate::board::Board;
 use crate::core::{Color, Piece, Square};
 
-/// Maximum length of a Gardner 5x5 FEN string (`29` placement chars + `" b - - 0 1"`).
-const MAX_GARDNER_FEN_LEN: usize = 39;
+/// Buffer capacity covering a 5x5 placement and typical clock fields (`<placement> <side> - - <hm> <fm>`).
+const GARDNER_FEN_CAPACITY: usize = 48;
 
 /// Errors that can occur when parsing a Gardner 5x5 FEN string.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -23,6 +23,12 @@ pub enum FenError {
 
     /// The active color field is neither `'w'` nor `'b'`.
     InvalidSideToMove,
+
+    /// The halfmove clock field is not a valid non-negative integer.
+    InvalidHalfmoveClock,
+
+    /// The fullmove number field is not a valid positive integer.
+    InvalidFullmoveNumber,
 }
 
 impl fmt::Display for FenError {
@@ -33,6 +39,10 @@ impl fmt::Display for FenError {
             Self::InvalidFileCount => write!(f, "each FEN rank must span exactly 5 files"),
             Self::InvalidPiece(ch) => write!(f, "invalid piece character in FEN: '{ch}'"),
             Self::InvalidSideToMove => write!(f, "side to move must be 'w' or 'b'"),
+            Self::InvalidHalfmoveClock => {
+                write!(f, "halfmove clock must be a non-negative integer")
+            }
+            Self::InvalidFullmoveNumber => write!(f, "fullmove number must be a positive integer"),
         }
     }
 }
@@ -46,7 +56,13 @@ impl Board {
     /// are emitted as the fixed suffix `"- - 0 1"`.
     #[must_use]
     pub fn to_fen(&self) -> String {
-        let mut fen_str = String::with_capacity(MAX_GARDNER_FEN_LEN);
+        self.to_fen_with_clocks(0, 1)
+    }
+
+    /// Serializes the board state into a Gardner 5x5 FEN string with the given move clocks.
+    #[must_use]
+    pub fn to_fen_with_clocks(&self, halfmove_clock: u16, fullmove_number: u16) -> String {
+        let mut fen_str = String::with_capacity(GARDNER_FEN_CAPACITY);
 
         for rank in (0..5_u8).rev() {
             let mut empty_count = 0_u8;
@@ -73,10 +89,14 @@ impl Board {
             }
         }
 
-        match self.side_to_move() {
-            Color::White => fen_str.push_str(" w - - 0 1"),
-            Color::Black => fen_str.push_str(" b - - 0 1"),
-        }
+        let side_char = match self.side_to_move() {
+            Color::White => 'w',
+            Color::Black => 'b',
+        };
+        let _ = write!(
+            fen_str,
+            " {side_char} - - {halfmove_clock} {fullmove_number}"
+        );
 
         fen_str
     }
@@ -89,17 +109,47 @@ impl Board {
     /// # Errors
     ///
     /// Returns a [`FenError`] if the field count is invalid, the board placement does not
-    /// have 5 ranks of 5 files each, an unknown piece character is encountered, or the
-    /// side to move is neither `'w'` nor `'b'`.
+    /// have 5 ranks of 5 files each, an unknown piece character is encountered, the
+    /// side to move is neither `'w'` nor `'b'`, or the move clocks in a 6-field FEN are invalid.
     pub fn from_fen(fen: &str) -> Result<Self, FenError> {
+        Self::from_fen_with_clocks(fen).map(|(board, _, _)| board)
+    }
+
+    /// Parses a Gardner 5x5 FEN string into `(Board, halfmove_clock, fullmove_number)`.
+    ///
+    /// For the 2-field short form, the clocks default to `(0, 1)`.
+    ///
+    /// # Errors
+    ///
+    /// Returns a [`FenError`] if the FEN format, piece placement, side to move, or move clocks
+    /// are invalid.
+    pub fn from_fen_with_clocks(fen: &str) -> Result<(Self, u16, u16), FenError> {
         let mut fields = fen.split_ascii_whitespace();
         let placement = fields.next().ok_or(FenError::InvalidFormat)?;
         let side_str = fields.next().ok_or(FenError::InvalidFormat)?;
 
-        let remaining_fields = fields.count();
-        if remaining_fields != 0 && remaining_fields != 4 {
-            return Err(FenError::InvalidFormat);
-        }
+        let (halfmove_clock, fullmove_number) = match fields.next() {
+            None => (0, 1),
+            Some(_castling) => {
+                let _ep = fields.next().ok_or(FenError::InvalidFormat)?;
+                let halfmove_str = fields.next().ok_or(FenError::InvalidFormat)?;
+                let fullmove_str = fields.next().ok_or(FenError::InvalidFormat)?;
+                if fields.next().is_some() {
+                    return Err(FenError::InvalidFormat);
+                }
+
+                let halfmove = halfmove_str
+                    .parse::<u16>()
+                    .map_err(|_| FenError::InvalidHalfmoveClock)?;
+                let fullmove = fullmove_str
+                    .parse::<u16>()
+                    .ok()
+                    .filter(|&n| n >= 1)
+                    .ok_or(FenError::InvalidFullmoveNumber)?;
+
+                (halfmove, fullmove)
+            }
+        };
 
         let side_to_move = match side_str {
             "w" => Color::White,
@@ -123,7 +173,7 @@ impl Board {
         }
 
         board.set_side_to_move(side_to_move);
-        Ok(board)
+        Ok((board, halfmove_clock, fullmove_number))
     }
 }
 

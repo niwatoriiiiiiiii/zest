@@ -1,6 +1,6 @@
 #![allow(missing_docs)]
 
-use zest::core::{Color, Piece, PieceType, Square};
+use zest::core::{Color, ParseSquareError, Piece, PieceType, Square};
 
 #[test]
 fn test_color_opposite() {
@@ -79,5 +79,63 @@ fn test_square_display() {
 
     for (i, &sq) in Square::ALL.iter().enumerate() {
         assert_eq!(format!("{sq}"), expected_names[i]);
+    }
+}
+
+#[test]
+fn test_piece_type_from_char() {
+    let pairs = [
+        ('p', PieceType::Pawn),
+        ('P', PieceType::Pawn),
+        ('n', PieceType::Knight),
+        ('N', PieceType::Knight),
+        ('b', PieceType::Bishop),
+        ('B', PieceType::Bishop),
+        ('r', PieceType::Rook),
+        ('R', PieceType::Rook),
+        ('q', PieceType::Queen),
+        ('Q', PieceType::Queen),
+        ('k', PieceType::King),
+        ('K', PieceType::King),
+    ];
+
+    for (ch, expected) in pairs {
+        assert_eq!(PieceType::from_char(ch), Some(expected));
+    }
+
+    assert_eq!(PieceType::from_char('x'), None);
+    assert_eq!(PieceType::from_char('1'), None);
+}
+
+#[test]
+fn test_piece_from_char_roundtrip() {
+    for color in [Color::White, Color::Black] {
+        for piece_type in [
+            PieceType::Pawn,
+            PieceType::Knight,
+            PieceType::Bishop,
+            PieceType::Rook,
+            PieceType::Queen,
+            PieceType::King,
+        ] {
+            let piece = Piece::new(color, piece_type);
+            assert_eq!(Piece::from_char(piece.to_char()), Some(piece));
+        }
+    }
+
+    assert_eq!(Piece::from_char('x'), None);
+    assert_eq!(Piece::from_char(' '), None);
+}
+
+#[test]
+fn test_square_from_str_and_ascii() {
+    for &sq in &Square::ALL {
+        let s = format!("{sq}");
+        assert_eq!(s.parse::<Square>(), Ok(sq));
+        assert_eq!(Square::from_ascii(s.as_bytes()), Some(sq));
+    }
+
+    for invalid in ["", "a", "a11", "f1", "a6", "a0", "A1", "e9", "あ1"] {
+        assert_eq!(invalid.parse::<Square>(), Err(ParseSquareError));
     }
 }
