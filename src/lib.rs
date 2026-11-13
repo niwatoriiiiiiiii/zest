@@ -9,4 +9,7 @@ pub mod board;
 /// Move generation and attack tables for Gardner minichess.
 pub mod movegen;
 
+/// Game state management, move history, and draw/termination rules.
+pub mod game;
+
 mod display;
