@@ -5,12 +5,16 @@ use crate::core::{PieceType, Square};
 pub enum ParseMoveError {
     /// The move string is not 4 or 5 bytes long.
     InvalidLength,
+
     /// The origin square is invalid.
     InvalidFromSquare,
+
     /// The destination square is invalid.
     InvalidToSquare,
+
     /// The origin and destination squares are identical.
     SameSquare,
+
     /// The promotion piece character is invalid (`n`, `b`, `r`, `q` expected).
     InvalidPromotion,
 }
