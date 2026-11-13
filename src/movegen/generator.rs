@@ -1,8 +1,8 @@
 use crate::board::{Bitboard, Board};
 use crate::core::{Color, Move, Piece, PieceType, Square};
 use crate::movegen::{
-    CheckInfo, MoveList, between, bishop_attacks, is_square_attacked, king_attacks, knight_attacks,
-    pawn_attacks, queen_attacks, rook_attacks,
+    CheckInfo, MoveList, between, bishop_attacks, is_square_attacked_with_occupied, king_attacks,
+    knight_attacks, pawn_attacks, queen_attacks, rook_attacks,
 };
 
 /// Generates all legal moves for the current player (`side_to_move`).
@@ -52,61 +52,58 @@ pub fn generate_legal_moves(board: &Board) -> MoveList {
     };
 
     // Generate moves for other pieces
-    for &sq in &Square::ALL {
-        if sq == my_king_sq {
+    let mut other_pieces = friendly_bb ^ Bitboard::from_square(my_king_sq);
+    while let Some(sq) = other_pieces.pop_lsb() {
+        let Some(piece) = board.piece_at(sq) else {
+            continue;
+        };
+
+        let is_pinned = check_info.pinned.contains(sq);
+        let allowed_ray = if is_pinned {
+            check_info.pin_rays[sq.index()]
+        } else {
+            Bitboard::ALL
+        };
+
+        // A piece pinned along one ray can never resolve a check coming from another ray
+        if is_pinned && num_checkers == 1 {
             continue;
         }
 
-        if let Some(piece) = board.piece_at(sq)
-            && piece.color == us
-        {
-            let is_pinned = check_info.pinned.contains(sq);
-            let allowed_ray = if is_pinned {
-                check_info.pin_rays[sq.index()]
-            } else {
-                Bitboard::ALL
-            };
+        let legal_target_mask = check_mask & allowed_ray & not_friendly;
 
-            // A piece pinned along one ray can never resolve a check coming from another ray
-            if is_pinned && num_checkers == 1 {
-                continue;
+        match piece.piece_type {
+            PieceType::Knight => {
+                // Pinned knight can never move along linear pin ray
+                if !is_pinned {
+                    push_moves(&mut moves, sq, knight_attacks(sq) & legal_target_mask);
+                }
             }
-
-            let legal_target_mask = check_mask & allowed_ray & not_friendly;
-
-            match piece.piece_type {
-                PieceType::Knight => {
-                    // Pinned knight can never move along linear pin ray
-                    if !is_pinned {
-                        push_moves(&mut moves, sq, knight_attacks(sq) & legal_target_mask);
-                    }
-                }
-                PieceType::Bishop => {
-                    push_moves(
-                        &mut moves,
-                        sq,
-                        bishop_attacks(sq, board.occupied()) & legal_target_mask,
-                    );
-                }
-                PieceType::Rook => {
-                    push_moves(
-                        &mut moves,
-                        sq,
-                        rook_attacks(sq, board.occupied()) & legal_target_mask,
-                    );
-                }
-                PieceType::Queen => {
-                    push_moves(
-                        &mut moves,
-                        sq,
-                        queen_attacks(sq, board.occupied()) & legal_target_mask,
-                    );
-                }
-                PieceType::Pawn => {
-                    generate_pawn_moves(&mut moves, board, sq, us, legal_target_mask);
-                }
-                PieceType::King => unreachable!(),
+            PieceType::Bishop => {
+                push_moves(
+                    &mut moves,
+                    sq,
+                    bishop_attacks(sq, board.occupied()) & legal_target_mask,
+                );
             }
+            PieceType::Rook => {
+                push_moves(
+                    &mut moves,
+                    sq,
+                    rook_attacks(sq, board.occupied()) & legal_target_mask,
+                );
+            }
+            PieceType::Queen => {
+                push_moves(
+                    &mut moves,
+                    sq,
+                    queen_attacks(sq, board.occupied()) & legal_target_mask,
+                );
+            }
+            PieceType::Pawn => {
+                generate_pawn_moves(&mut moves, board, sq, us, legal_target_mask);
+            }
+            PieceType::King => unreachable!(),
         }
     }
 
@@ -126,13 +123,11 @@ fn generate_king_moves(
     us: Color,
     not_friendly: Bitboard,
 ) {
+    let occ_without_king = board.occupied() & !Bitboard::from_square(king_sq);
     let mut targets = king_attacks(king_sq) & not_friendly;
     while let Some(to) = targets.pop_lsb() {
-        let m = Move::new(king_sq, to, None);
-        let mut next_board = *board;
-        next_board.make_move(m);
-        if !is_square_attacked(&next_board, to, !us) {
-            moves.push(m);
+        if !is_square_attacked_with_occupied(board, to, !us, occ_without_king) {
+            moves.push(Move::new(king_sq, to, None));
         }
     }
 }
@@ -150,19 +145,15 @@ fn generate_pawn_moves(
     };
     if (0..5).contains(&forward_rank)
         && let Some(to) = Square::new(sq.file(), forward_rank.cast_unsigned())
-        && board.piece_at(to).is_none()
+        && !board.occupied().contains(to)
         && legal_target_mask.contains(to)
     {
         push_pawn_move(moves, sq, to, us);
     }
 
-    let mut attacks = pawn_attacks(sq, us) & legal_target_mask;
+    let mut attacks = pawn_attacks(sq, us) & legal_target_mask & board.occupied();
     while let Some(to) = attacks.pop_lsb() {
-        if let Some(target) = board.piece_at(to)
-            && target.color != us
-        {
-            push_pawn_move(moves, sq, to, us);
-        }
+        push_pawn_move(moves, sq, to, us);
     }
 }
 
