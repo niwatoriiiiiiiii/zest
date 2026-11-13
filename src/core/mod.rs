@@ -4,6 +4,6 @@ mod piece;
 mod square;
 
 pub use color::Color;
-pub use moves::Move;
+pub use moves::{Move, ParseMoveError};
 pub use piece::{Piece, PieceType};
-pub use square::Square;
+pub use square::{ParseSquareError, Square};

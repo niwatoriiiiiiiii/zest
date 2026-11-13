@@ -1,7 +1,7 @@
 #![allow(missing_docs)]
 
 use std::collections::HashSet;
-use zest::core::{Move, PieceType, Square};
+use zest::core::{Move, ParseMoveError, PieceType, Square};
 
 #[test]
 fn test_move_basic() {
@@ -69,4 +69,57 @@ fn test_move_display() {
 
     let promo_bishop = Move::new(Square::D4, Square::D5, Some(PieceType::Bishop));
     assert_eq!(format!("{promo_bishop}"), "d4d5b");
+}
+
+#[test]
+fn test_move_from_uci_and_from_str() {
+    let normal = Move::from_uci("c2c3").expect("valid UCI move");
+    assert_eq!(normal, Move::new(Square::C2, Square::C3, None));
+    assert_eq!("c2c3".parse::<Move>(), Ok(normal));
+
+    for (uci, pt) in [
+        ("e4e5n", PieceType::Knight),
+        ("e4e5b", PieceType::Bishop),
+        ("e4e5r", PieceType::Rook),
+        ("e4e5q", PieceType::Queen),
+        ("e4e5Q", PieceType::Queen),
+    ] {
+        let m = Move::from_uci(uci).expect("valid promotion UCI move");
+        assert_eq!(m, Move::new(Square::E4, Square::E5, Some(pt)));
+    }
+}
+
+#[test]
+fn test_move_from_uci_errors() {
+    assert_eq!(Move::from_uci(""), Err(ParseMoveError::InvalidLength));
+    assert_eq!(Move::from_uci("a1a"), Err(ParseMoveError::InvalidLength));
+    assert_eq!(Move::from_uci("a1a2q1"), Err(ParseMoveError::InvalidLength));
+    assert!(Move::from_uci("あa2").is_err());
+    assert!(Move::from_uci("あいうえ").is_err());
+
+    assert_eq!(
+        Move::from_uci("f1a2"),
+        Err(ParseMoveError::InvalidFromSquare)
+    );
+    assert_eq!(
+        Move::from_uci("a6a2"),
+        Err(ParseMoveError::InvalidFromSquare)
+    );
+    assert_eq!(Move::from_uci("a1f2"), Err(ParseMoveError::InvalidToSquare));
+    assert_eq!(Move::from_uci("a1a6"), Err(ParseMoveError::InvalidToSquare));
+
+    assert_eq!(Move::from_uci("c3c3"), Err(ParseMoveError::SameSquare));
+
+    assert_eq!(
+        Move::from_uci("e4e5k"),
+        Err(ParseMoveError::InvalidPromotion)
+    );
+    assert_eq!(
+        Move::from_uci("e4e5p"),
+        Err(ParseMoveError::InvalidPromotion)
+    );
+    assert_eq!(
+        Move::from_uci("e4e5x"),
+        Err(ParseMoveError::InvalidPromotion)
+    );
 }

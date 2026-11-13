@@ -36,6 +36,20 @@ impl PieceType {
         }
     }
 
+    /// Parses a piece type from a case-insensitive character (`p`, `n`, `b`, `r`, `q`, `k`).
+    #[must_use]
+    pub const fn from_char(ch: char) -> Option<Self> {
+        match ch.to_ascii_lowercase() {
+            'p' => Some(Self::Pawn),
+            'n' => Some(Self::Knight),
+            'b' => Some(Self::Bishop),
+            'r' => Some(Self::Rook),
+            'q' => Some(Self::Queen),
+            'k' => Some(Self::King),
+            _ => None,
+        }
+    }
+
     /// Returns the array index (`0..=5`) for this piece type.
     #[must_use]
     pub const fn index(self) -> usize {
@@ -79,20 +93,17 @@ impl Piece {
     /// Parses a piece from a FEN character (`'P'`..`'K'` for white, `'p'`..`'k'` for black).
     #[must_use]
     pub const fn from_char(ch: char) -> Option<Self> {
-        match ch {
-            'P' => Some(Self::new(Color::White, PieceType::Pawn)),
-            'N' => Some(Self::new(Color::White, PieceType::Knight)),
-            'B' => Some(Self::new(Color::White, PieceType::Bishop)),
-            'R' => Some(Self::new(Color::White, PieceType::Rook)),
-            'Q' => Some(Self::new(Color::White, PieceType::Queen)),
-            'K' => Some(Self::new(Color::White, PieceType::King)),
-            'p' => Some(Self::new(Color::Black, PieceType::Pawn)),
-            'n' => Some(Self::new(Color::Black, PieceType::Knight)),
-            'b' => Some(Self::new(Color::Black, PieceType::Bishop)),
-            'r' => Some(Self::new(Color::Black, PieceType::Rook)),
-            'q' => Some(Self::new(Color::Black, PieceType::Queen)),
-            'k' => Some(Self::new(Color::Black, PieceType::King)),
-            _ => None,
+        let color = if ch.is_ascii_uppercase() {
+            Color::White
+        } else if ch.is_ascii_lowercase() {
+            Color::Black
+        } else {
+            return None;
+        };
+
+        match PieceType::from_char(ch) {
+            Some(piece_type) => Some(Self::new(color, piece_type)),
+            None => None,
         }
     }
 }
