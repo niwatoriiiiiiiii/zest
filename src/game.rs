@@ -1,6 +1,6 @@
 use std::fmt;
 
-use crate::board::Board;
+use crate::board::{Board, FenError};
 use crate::core::{Color, Move, ParseMoveError, PieceType, Square};
 use crate::movegen::{MoveList, generate_legal_moves, in_check};
 
@@ -100,13 +100,40 @@ impl Game {
     /// Creates a game starting from the given `board` with `halfmove_clock = 0` and `fullmove_number = 1`.
     #[must_use]
     pub fn from_board(board: Board) -> Self {
+        Self::from_board_with_clocks(board, 0, 1)
+    }
+
+    /// Creates a game from `board` with explicit move clocks (`fullmove_number` clamped to at least 1).
+    #[must_use]
+    pub fn from_board_with_clocks(board: Board, halfmove_clock: u16, fullmove_number: u16) -> Self {
         Self {
             board,
-            halfmove_clock: 0,
-            fullmove_number: 1,
+            halfmove_clock,
+            fullmove_number: fullmove_number.max(1),
             history: vec![board.key()],
             reversible_start: 0,
         }
+    }
+
+    /// Parses a Gardner 5x5 FEN string into a [`Game`], preserving its halfmove and fullmove clocks.
+    ///
+    /// # Errors
+    ///
+    /// Returns a [`FenError`] if the FEN string cannot be parsed.
+    pub fn from_fen(fen: &str) -> Result<Self, FenError> {
+        let (board, halfmove_clock, fullmove_number) = Board::from_fen_with_clocks(fen)?;
+        Ok(Self::from_board_with_clocks(
+            board,
+            halfmove_clock,
+            fullmove_number,
+        ))
+    }
+
+    /// Serializes the current game position and clocks into a Gardner 5x5 FEN string.
+    #[must_use]
+    pub fn to_fen(&self) -> String {
+        self.board
+            .to_fen_with_clocks(self.halfmove_clock, self.fullmove_number)
     }
 
     /// Returns a reference to the current board.

@@ -1,6 +1,6 @@
 #![allow(missing_docs)]
 
-use zest::board::Board;
+use zest::board::{Board, FenError};
 use zest::core::{Color, Move, ParseMoveError, Square};
 use zest::game::{DrawReason, Game, GameStatus, PlayMoveError};
 
@@ -206,4 +206,43 @@ fn test_game_try_uci_parse_error() {
         game.try_move(Move::new(Square::A1, Square::A3, None)),
         Err(PlayMoveError::IllegalMove)
     );
+}
+
+#[test]
+fn test_game_fen_roundtrip_and_clocks() {
+    let mut game = Game::new();
+    assert_eq!(game.to_fen(), "rnbqk/ppppp/5/PPPPP/RNBQK w - - 0 1");
+
+    assert_eq!(game.try_uci("b1c3"), Ok(GameStatus::Ongoing));
+    assert_eq!(game.to_fen(), "rnbqk/ppppp/2N2/PPPPP/R1BQK b - - 1 1");
+
+    assert_eq!(game.try_uci("b5a3"), Ok(GameStatus::Ongoing));
+    assert_eq!(game.to_fen(), "r1bqk/ppppp/n1N2/PPPPP/R1BQK w - - 2 2");
+
+    let restored = Game::from_fen(&game.to_fen()).expect("valid game FEN");
+    assert_eq!(restored.board(), game.board());
+    assert_eq!(restored.halfmove_clock(), 2);
+    assert_eq!(restored.fullmove_number(), 2);
+    assert_eq!(restored.to_fen(), game.to_fen());
+
+    assert_eq!(game.try_uci("d2d3"), Ok(GameStatus::Ongoing));
+    assert_eq!(game.to_fen(), "r1bqk/ppppp/n1NP1/PPP1P/R1BQK b - - 0 2");
+
+    assert_eq!(Game::from_fen("bad"), Err(FenError::InvalidFormat));
+}
+
+#[test]
+fn test_game_from_fen_triggers_fifty_move_rule_at_100() {
+    let mut game =
+        Game::from_fen("3rk/p1p1p/P1P1P/5/R3K b - - 99 50").expect("valid near-draw FEN");
+    assert_eq!(game.status(), GameStatus::Ongoing);
+
+    // One quiet Black king move reaches halfmove_clock == 100 and increments fullmove_number
+    assert_eq!(
+        game.try_uci("d5c5"),
+        Ok(GameStatus::Draw(DrawReason::FiftyMoveRule))
+    );
+    assert_eq!(game.halfmove_clock(), 100);
+    assert_eq!(game.fullmove_number(), 51);
+    assert_eq!(game.to_fen(), "2r1k/p1p1p/P1P1P/5/R3K w - - 100 51");
 }
