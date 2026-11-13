@@ -66,6 +66,48 @@ pub fn is_square_attacked_with_occupied(
     rook_attacks(sq, occupied).intersects(enemies & (board.piece_type_bb(PieceType::Rook) | queens))
 }
 
+/// Returns a bitboard of all pieces of `by_color` attacking `sq`.
+#[must_use]
+pub fn attackers_to(board: &Board, sq: Square, by_color: Color) -> Bitboard {
+    attackers_to_with_occupied(board, sq, by_color, board.occupied())
+}
+
+/// Returns a bitboard of all pieces of `by_color` attacking `sq` under `occupied`.
+#[must_use]
+pub fn attackers_to_with_occupied(
+    board: &Board,
+    sq: Square,
+    by_color: Color,
+    occupied: Bitboard,
+) -> Bitboard {
+    let queens = board.piece_type_bb(PieceType::Queen);
+    let attackers = (pawn_attacks(sq, !by_color) & board.piece_type_bb(PieceType::Pawn))
+        | (knight_attacks(sq) & board.piece_type_bb(PieceType::Knight))
+        | (king_attacks(sq) & board.piece_type_bb(PieceType::King))
+        | (bishop_attacks(sq, occupied) & (board.piece_type_bb(PieceType::Bishop) | queens))
+        | (rook_attacks(sq, occupied) & (board.piece_type_bb(PieceType::Rook) | queens));
+
+    attackers & board.color_bb(by_color)
+}
+
+/// Returns a bitboard of enemy pieces giving check to the side to move's king.
+///
+/// Returns [`Bitboard::EMPTY`] if the side to move has no king on the board.
+#[must_use]
+pub fn checkers(board: &Board) -> Bitboard {
+    let us = board.side_to_move();
+    let Some(king_sq) = board.pieces_bb(us, PieceType::King).lsb() else {
+        return Bitboard::EMPTY;
+    };
+    attackers_to(board, king_sq, !us)
+}
+
+/// Returns `true` if the side to move's king is currently in check.
+#[must_use]
+pub fn in_check(board: &Board) -> bool {
+    !checkers(board).is_empty()
+}
+
 /// Returns a bitboard of all squares attacked by a knight on the given `sq`.
 #[must_use]
 pub const fn knight_attacks(sq: Square) -> Bitboard {

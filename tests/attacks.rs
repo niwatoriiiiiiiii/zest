@@ -3,8 +3,8 @@
 use zest::board::{Bitboard, Board};
 use zest::core::{Color, Piece, PieceType, Square};
 use zest::movegen::{
-    bishop_attacks, is_square_attacked, king_attacks, knight_attacks, pawn_attacks, queen_attacks,
-    rook_attacks,
+    attackers_to, bishop_attacks, checkers, in_check, is_square_attacked, king_attacks,
+    knight_attacks, pawn_attacks, queen_attacks, rook_attacks,
 };
 
 #[test]
@@ -375,4 +375,53 @@ fn test_is_square_attacked_gardner_initial() {
     // E.g. White pawn at B2 attacks A3 and C3
     assert!(is_square_attacked(&board, Square::A3, Color::White));
     assert!(is_square_attacked(&board, Square::C3, Color::White));
+}
+
+#[test]
+fn test_attackers_to_multiple_pieces_and_blockers() {
+    let board = Board::from_fen("2r2/5/1N1p1/3P1/2Q2 w - - 0 1").expect("valid FEN");
+
+    // C3 is attacked by White Queen (C1) and White Pawn (D2)
+    let white_c3 = attackers_to(&board, Square::C3, Color::White);
+    assert_eq!(white_c3.count(), 2);
+    assert!(white_c3.contains(Square::C1));
+    assert!(white_c3.contains(Square::D2));
+
+    // C3 is attacked by Black Rook (C5), while Black Pawn (D3) does not attack C3
+    let black_c3 = attackers_to(&board, Square::C3, Color::Black);
+    assert_eq!(black_c3.count(), 1);
+    assert!(black_c3.contains(Square::C5));
+
+    // D4 is attacked by White Knight (B3)
+    let attackers_d4 = attackers_to(&board, Square::D4, Color::White);
+    assert_eq!(attackers_d4, Bitboard::from_square(Square::B3));
+}
+
+#[test]
+fn test_checkers_and_in_check() {
+    // Empty board with no king should not panic
+    let empty = Board::empty();
+    assert_eq!(checkers(&empty), Bitboard::EMPTY);
+    assert!(!in_check(&empty));
+
+    // Initial board is not in check
+    let initial = Board::gardner_initial();
+    assert_eq!(checkers(&initial), Bitboard::EMPTY);
+    assert!(!in_check(&initial));
+
+    // Double check to White King on E1 from Queen C3 and Knight D3
+    let double_check = Board::from_fen("4k/5/2qn1/5/4K w - - 0 1").expect("valid double check FEN");
+    let expected = Bitboard::from_square(Square::C3) | Bitboard::from_square(Square::D3);
+    assert_eq!(checkers(&double_check), expected);
+    assert!(in_check(&double_check));
+
+    // Blocking Queen ray on D2 leaves only Knight D3 checking
+    let blocked = Board::from_fen("4k/5/2qn1/3P1/4K w - - 0 1").expect("valid blocked FEN");
+    assert_eq!(checkers(&blocked), Bitboard::from_square(Square::D3));
+    assert!(in_check(&blocked));
+
+    // Black to move: Black King on E5 is not in check
+    let black_turn = Board::from_fen("4k/5/2qn1/5/4K b - - 0 1").expect("valid FEN");
+    assert_eq!(checkers(&black_turn), Bitboard::EMPTY);
+    assert!(!in_check(&black_turn));
 }
