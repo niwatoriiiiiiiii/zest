@@ -1,5 +1,5 @@
 use crate::board::{Bitboard, Board};
-use crate::core::{Color, Piece, PieceType, Square};
+use crate::core::{Color, PieceType, Square};
 use crate::movegen::magic::{bishop_attacks, rook_attacks};
 
 const KNIGHT_MOVES: [(i8, i8); 8] = [
@@ -46,59 +46,24 @@ pub fn is_square_attacked_with_occupied(
     by_color: Color,
     occupied: Bitboard,
 ) -> bool {
-    if has_attacker(
-        board,
-        pawn_attacks(sq, !by_color),
-        by_color,
-        PieceType::Pawn,
-    ) {
-        return true;
-    }
-    if has_attacker(board, knight_attacks(sq), by_color, PieceType::Knight) {
-        return true;
-    }
-    if has_attacker(board, king_attacks(sq), by_color, PieceType::King) {
-        return true;
-    }
-    if has_slider_attacker(
-        board,
-        bishop_attacks(sq, occupied),
-        by_color,
-        PieceType::Bishop,
-    ) {
-        return true;
-    }
-    if has_slider_attacker(board, rook_attacks(sq, occupied), by_color, PieceType::Rook) {
-        return true;
-    }
+    let enemies = board.color_bb(by_color);
+    let queens = board.piece_type_bb(PieceType::Queen);
 
-    false
-}
-
-fn has_attacker(board: &Board, mut bb: Bitboard, by_color: Color, piece_type: PieceType) -> bool {
-    while let Some(s) = bb.pop_lsb() {
-        if board.piece_at(s) == Some(Piece::new(by_color, piece_type)) {
-            return true;
-        }
+    if pawn_attacks(sq, !by_color).intersects(enemies & board.piece_type_bb(PieceType::Pawn)) {
+        return true;
     }
-    false
-}
-
-fn has_slider_attacker(
-    board: &Board,
-    mut bb: Bitboard,
-    by_color: Color,
-    piece_type: PieceType,
-) -> bool {
-    while let Some(s) = bb.pop_lsb() {
-        if let Some(piece) = board.piece_at(s)
-            && piece.color == by_color
-            && (piece.piece_type == piece_type || piece.piece_type == PieceType::Queen)
-        {
-            return true;
-        }
+    if knight_attacks(sq).intersects(enemies & board.piece_type_bb(PieceType::Knight)) {
+        return true;
     }
-    false
+    if king_attacks(sq).intersects(enemies & board.piece_type_bb(PieceType::King)) {
+        return true;
+    }
+    if bishop_attacks(sq, occupied)
+        .intersects(enemies & (board.piece_type_bb(PieceType::Bishop) | queens))
+    {
+        return true;
+    }
+    rook_attacks(sq, occupied).intersects(enemies & (board.piece_type_bb(PieceType::Rook) | queens))
 }
 
 /// Returns a bitboard of all squares attacked by a knight on the given `sq`.
