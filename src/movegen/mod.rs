@@ -13,4 +13,4 @@ pub use between::between;
 pub use check_info::CheckInfo;
 pub use generator::generate_legal_moves;
 pub use magic::{bishop_attacks, queen_attacks, rook_attacks};
-pub use movelist::MoveList;
+pub use movelist::{MAX_MOVES, MoveList};
