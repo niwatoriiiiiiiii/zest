@@ -1,7 +1,7 @@
 use std::fmt;
 
 use crate::board::{Board, FenError};
-use crate::core::{Color, Move, ParseMoveError, PieceType, Square};
+use crate::core::{Color, Move, ParseMoveError, PieceType};
 use crate::movegen::{MoveList, generate_legal_moves, in_check};
 
 /// Reasons a Gardner minichess game can end in a draw.
@@ -168,32 +168,8 @@ impl Game {
 
     /// Returns `true` if neither side has enough material to deliver checkmate.
     #[must_use]
-    pub fn is_insufficient_material(&self) -> bool {
-        let heavy_or_pawns = self.board.piece_type_bb(PieceType::Pawn)
-            | self.board.piece_type_bb(PieceType::Rook)
-            | self.board.piece_type_bb(PieceType::Queen);
-        if !heavy_or_pawns.is_empty() {
-            return false;
-        }
-
-        let total_pieces = self.board.occupied().count();
-        if total_pieces <= 3 {
-            // K vs K, K+N vs K, K+B vs K
-            return true;
-        }
-
-        if total_pieces == 4 {
-            let white_bishops = self.board.pieces_bb(Color::White, PieceType::Bishop);
-            let black_bishops = self.board.pieces_bb(Color::Black, PieceType::Bishop);
-            if white_bishops.count() == 1
-                && black_bishops.count() == 1
-                && let (Some(wb), Some(bb)) = (white_bishops.lsb(), black_bishops.lsb())
-            {
-                return square_color(wb) == square_color(bb);
-            }
-        }
-
-        false
+    pub const fn is_insufficient_material(&self) -> bool {
+        self.board.is_insufficient_material()
     }
 
     /// Returns `true` if the current position has occurred at least three times since the last irreversible move.
@@ -298,8 +274,4 @@ impl Game {
 
         GameStatus::Ongoing
     }
-}
-
-const fn square_color(sq: Square) -> u8 {
-    (sq.file() + sq.rank()) % 2
 }

@@ -162,4 +162,33 @@ impl Board {
     pub const fn key(self) -> u64 {
         self.key
     }
+
+    /// Returns `true` if neither side has enough material to deliver checkmate.
+    #[must_use]
+    pub const fn is_insufficient_material(self) -> bool {
+        let heavy_or_pawns = self.piece_type_bb(PieceType::Pawn).as_raw()
+            | self.piece_type_bb(PieceType::Rook).as_raw()
+            | self.piece_type_bb(PieceType::Queen).as_raw();
+        if heavy_or_pawns != 0 {
+            return false;
+        }
+
+        let total_pieces = self.occupied.count();
+        if total_pieces <= 3 {
+            return true;
+        }
+
+        if total_pieces == 4 {
+            let white_bishops = self.pieces_bb(Color::White, PieceType::Bishop);
+            let black_bishops = self.pieces_bb(Color::Black, PieceType::Bishop);
+            if white_bishops.count() == 1
+                && black_bishops.count() == 1
+                && let (Some(wb), Some(bb)) = (white_bishops.lsb(), black_bishops.lsb())
+            {
+                return (wb.file() + wb.rank()) % 2 == (bb.file() + bb.rank()) % 2;
+            }
+        }
+
+        false
+    }
 }

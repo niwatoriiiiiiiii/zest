@@ -12,6 +12,9 @@ pub mod movegen;
 /// Static position evaluation for Gardner minichess.
 pub mod eval;
 
+/// Game-tree search engine for Gardner minichess.
+pub mod search;
+
 /// Game state management, move history, and draw/termination rules.
 pub mod game;
 
