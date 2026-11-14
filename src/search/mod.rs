@@ -3,6 +3,7 @@ mod ordering;
 mod quiescence;
 mod state;
 mod tt;
+mod tt_entry;
 mod types;
 
 pub use engine::{Searcher, search};

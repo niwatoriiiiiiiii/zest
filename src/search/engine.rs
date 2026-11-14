@@ -6,8 +6,9 @@ use crate::eval::evaluate;
 use crate::movegen::{MoveList, generate_legal_moves, in_check};
 use crate::search::ordering::{order_moves, pick_next_move};
 use crate::search::quiescence::quiesce;
-use crate::search::state::{SearchState, advance_board_and_clock};
-use crate::search::tt::{Bound, DEFAULT_HASH_MB, TranspositionTable, score_from_tt, score_to_tt};
+use crate::search::state::{NodeCtx, SearchState};
+use crate::search::tt::{DEFAULT_HASH_MB, TranspositionTable};
+use crate::search::tt_entry::Bound;
 use crate::search::types::{INF_SCORE, MAX_PLY, SearchLimits, SearchResult, mated_score_in};
 
 /// Stateful game-tree search engine using iterative deepening and negamax alpha-beta pruning.
@@ -116,6 +117,12 @@ impl Searcher {
         let mut pv_hint = None;
 
         let max_depth = usize::from(limits.max_depth.unwrap_or(64)).clamp(1, MAX_PLY);
+        let root_ctx = NodeCtx {
+            ply: 0,
+            halfmove: halfmove_clock,
+            reversible_start: 0,
+            stop,
+        };
 
         for depth in 1..=max_depth {
             if self.state.should_stop(stop) {
@@ -123,14 +130,8 @@ impl Searcher {
             }
 
             #[allow(clippy::cast_possible_truncation)]
-            let score = self.negamax_root(
-                board,
-                &root_moves,
-                depth as u8,
-                halfmove_clock,
-                pv_hint,
-                stop,
-            );
+            let depth_u8 = depth as u8;
+            let score = self.negamax_root(board, &root_moves, depth_u8, pv_hint, root_ctx);
             if self.state.aborted {
                 break;
             }
@@ -140,10 +141,7 @@ impl Searcher {
                 let candidate = self.state.pv_table[0][0];
                 best_move = candidate;
                 best_score = score;
-                #[allow(clippy::cast_possible_truncation)]
-                {
-                    completed_depth = depth as u8;
-                }
+                completed_depth = depth_u8;
                 best_pv = self.state.pv_table[0][..root_len].to_vec();
                 self.extend_pv_from_tt(board, &mut best_pv, depth);
                 pv_hint = Some(candidate);
@@ -171,15 +169,11 @@ impl Searcher {
             cur.make_move(mv);
             seen.push(cur.key());
         }
-        while pv.len() < max_len {
-            if cur.is_insufficient_material() {
-                break;
-            }
+        while pv.len() < max_len && !cur.is_insufficient_material() {
             let Some(mv) = self.tt.probe(cur.key()).and_then(|hit| hit.best_move) else {
                 break;
             };
-            let legal = generate_legal_moves(&cur);
-            if !legal.as_slice().contains(&mv) {
+            if !generate_legal_moves(&cur).as_slice().contains(&mv) {
                 break;
             }
             cur.make_move(mv);
@@ -197,9 +191,8 @@ impl Searcher {
         board: &Board,
         moves: &MoveList,
         depth: u8,
-        halfmove_clock: u16,
         pv_hint: Option<Move>,
-        stop: Option<&AtomicBool>,
+        ctx: NodeCtx<'_>,
     ) -> i32 {
         self.state.nodes += 1;
         self.state.pv_len[0] = 0;
@@ -210,39 +203,17 @@ impl Searcher {
             Some(hit) if hit.depth >= depth && hit.best_move.is_some() => hit.best_move,
             _ => pv_hint.or_else(|| tt_hit.and_then(|hit| hit.best_move)),
         };
+
         let mut alpha = -INF_SCORE;
-        let beta = INF_SCORE;
         let mut best_move = None;
         let (mut scored, len) = order_moves(board, moves, priority_move);
 
         for idx in 0..len {
             let mv = pick_next_move(&mut scored, idx, len);
-            let mut next_board = *board;
-            let (next_halfmove, next_rev_start) = advance_board_and_clock(
-                &mut next_board,
-                mv,
-                halfmove_clock,
-                0,
-                self.state.path_keys.len(),
-            );
-
-            self.state.path_keys.push(next_board.key());
-            let score = -self.negamax(
-                &next_board,
-                depth - 1,
-                1,
-                -beta,
-                -alpha,
-                next_halfmove,
-                next_rev_start,
-                stop,
-            );
-            self.state.path_keys.pop();
-
+            let score = self.search_child(board, mv, depth, alpha, INF_SCORE, ctx);
             if self.state.aborted {
                 return 0;
             }
-
             if score > alpha {
                 alpha = score;
                 best_move = Some(mv);
@@ -251,120 +222,83 @@ impl Searcher {
         }
 
         self.tt
-            .store(key, depth, Bound::Exact, score_to_tt(alpha, 0), best_move);
+            .store_at(key, depth, Bound::Exact, alpha, 0, best_move);
         alpha
     }
 
-    #[allow(clippy::too_many_arguments)]
     fn negamax(
         &mut self,
         board: &Board,
         depth: u8,
-        ply: usize,
         mut alpha: i32,
         beta: i32,
-        halfmove_clock: u16,
-        reversible_start: usize,
-        stop: Option<&AtomicBool>,
+        ctx: NodeCtx<'_>,
     ) -> i32 {
-        self.state.pv_len[ply] = ply;
+        self.state.pv_len[ctx.ply] = ctx.ply;
 
         if depth == 0 {
-            return quiesce(
-                &mut self.state,
-                &mut self.tt,
-                board,
-                ply,
-                alpha,
-                beta,
-                halfmove_clock,
-                reversible_start,
-                stop,
-            );
+            return quiesce(&mut self.state, &mut self.tt, board, alpha, beta, ctx);
         }
 
-        if self.state.check_limits(stop) {
+        if self.state.check_limits(ctx.stop) {
             return 0;
         }
 
         self.state.nodes += 1;
-
-        if ply >= MAX_PLY {
+        if ctx.ply >= MAX_PLY {
             return evaluate(board);
         }
 
         let key = board.key();
-        if self.state.is_repetition(key, reversible_start) || board.is_insufficient_material() {
+        if self.state.is_repetition(key, ctx.reversible_start) || board.is_insufficient_material() {
             return 0;
         }
 
-        let (tt_cutoff, tt_move) = self.probe_tt_node(key, depth, ply, alpha, beta, halfmove_clock);
-        if let Some(tt_score) = tt_cutoff {
+        let tt_probe = self
+            .tt
+            .probe_cutoff(key, depth, ctx.ply, alpha, beta, ctx.halfmove);
+        if let Some((tt_score, is_exact)) = tt_probe.cutoff {
+            if is_exact && let Some(mv) = tt_probe.best_move {
+                self.state.pv_table[ctx.ply][ctx.ply] = mv;
+                self.state.pv_len[ctx.ply] = ctx.ply + 1;
+            }
             return tt_score;
         }
 
         let moves = generate_legal_moves(board);
         if moves.is_empty() {
             return if in_check(board) {
-                mated_score_in(ply)
+                mated_score_in(ctx.ply)
             } else {
                 0
             };
         }
-
-        if halfmove_clock >= 100 {
+        if ctx.halfmove >= 100 {
             return 0;
         }
 
         let orig_alpha = alpha;
         let mut best_score = -INF_SCORE;
         let mut best_move = None;
-        let (mut scored, len) = order_moves(board, &moves, tt_move);
+        let (mut scored, len) = order_moves(board, &moves, tt_probe.best_move);
 
         for idx in 0..len {
             let mv = pick_next_move(&mut scored, idx, len);
-            let mut next_board = *board;
-            let (next_halfmove, next_rev_start) = advance_board_and_clock(
-                &mut next_board,
-                mv,
-                halfmove_clock,
-                reversible_start,
-                self.state.path_keys.len(),
-            );
-
-            self.state.path_keys.push(next_board.key());
-            let score = -self.negamax(
-                &next_board,
-                depth - 1,
-                ply + 1,
-                -beta,
-                -alpha,
-                next_halfmove,
-                next_rev_start,
-                stop,
-            );
-            self.state.path_keys.pop();
-
+            let score = self.search_child(board, mv, depth, alpha, beta, ctx);
             if self.state.aborted {
                 return 0;
             }
-
             if score > best_score {
                 best_score = score;
                 best_move = Some(mv);
                 if score > alpha {
                     if score >= beta {
-                        self.tt.store(
-                            key,
-                            depth,
-                            Bound::Lower,
-                            score_to_tt(best_score, ply),
-                            best_move,
-                        );
+                        self.tt
+                            .store_at(key, depth, Bound::Lower, best_score, ctx.ply, best_move);
                         return best_score;
                     }
                     alpha = score;
-                    self.state.update_pv(ply, mv);
+                    self.state.update_pv(ctx.ply, mv);
                 }
             }
         }
@@ -375,46 +309,26 @@ impl Searcher {
             (Bound::Upper, None)
         };
         self.tt
-            .store(key, depth, bound, score_to_tt(best_score, ply), stored_move);
-
+            .store_at(key, depth, bound, best_score, ctx.ply, stored_move);
         best_score
     }
 
-    fn probe_tt_node(
+    #[inline]
+    fn search_child(
         &mut self,
-        key: u64,
+        board: &Board,
+        mv: Move,
         depth: u8,
-        ply: usize,
         alpha: i32,
         beta: i32,
-        halfmove_clock: u16,
-    ) -> (Option<i32>, Option<Move>) {
-        let Some(hit) = self.tt.probe(key) else {
-            return (None, None);
-        };
-        let tt_move = hit.best_move;
-        if halfmove_clock >= 100 || hit.depth < depth {
-            return (None, tt_move);
-        }
-
-        let tt_score = score_from_tt(hit.score, ply);
-        let cutoff = match hit.bound {
-            Bound::Exact => true,
-            Bound::Lower => tt_score >= beta,
-            Bound::Upper => tt_score <= alpha,
-            Bound::None => false,
-        };
-        if !cutoff {
-            return (None, tt_move);
-        }
-
-        if hit.bound == Bound::Exact
-            && let Some(mv) = tt_move
-        {
-            self.state.pv_table[ply][ply] = mv;
-            self.state.pv_len[ply] = ply + 1;
-        }
-        (Some(tt_score), tt_move)
+        ctx: NodeCtx<'_>,
+    ) -> i32 {
+        let mut next_board = *board;
+        let child_ctx = ctx.advance(&mut next_board, mv, self.state.path_keys.len());
+        self.state.path_keys.push(next_board.key());
+        let score = -self.negamax(&next_board, depth - 1, -beta, -alpha, child_ctx);
+        self.state.path_keys.pop();
+        score
     }
 }
 
