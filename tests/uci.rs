@@ -167,6 +167,16 @@ fn executes_uci_handshake_display_eval_and_perft() {
 
     let uci_lines = session.handle_command_sync(&UciCommand::Uci);
     assert_eq!(uci_lines.first().map(String::as_str), Some("id name Zest"));
+    assert!(
+        uci_lines
+            .iter()
+            .any(|line| line == "option name Hash type spin default 16 min 1 max 512")
+    );
+    assert!(
+        uci_lines
+            .iter()
+            .any(|line| line == "option name Clear Hash type button")
+    );
     assert_eq!(uci_lines.last().map(String::as_str), Some("uciok"));
 
     assert_eq!(
@@ -232,4 +242,75 @@ fn formats_search_scores_mate_and_terminal_bestmove() {
         "info was: {terminal_info}"
     );
     assert_eq!(format_bestmove(&terminal_res), "bestmove (none)");
+}
+
+#[test]
+fn handles_hash_setoption_clear_hash_and_ucinewgame() {
+    let mut session = UciSession::new();
+    assert_eq!(session.hash_mb(), Some(16));
+
+    assert!(
+        session
+            .handle_command_sync(&UciCommand::SetOption {
+                name: "hash".to_string(),
+                value: Some("4".to_string()),
+            })
+            .is_empty()
+    );
+    assert_eq!(session.hash_mb(), Some(4));
+
+    assert!(
+        session
+            .handle_command_sync(&UciCommand::SetOption {
+                name: "Hash".to_string(),
+                value: Some("0".to_string()),
+            })
+            .is_empty()
+    );
+    assert_eq!(session.hash_mb(), Some(1));
+
+    let bad = session.handle_command_sync(&UciCommand::SetOption {
+        name: "Hash".to_string(),
+        value: Some("abc".to_string()),
+    });
+    assert!(
+        bad.first()
+            .is_some_and(|line| line.starts_with("info string"))
+    );
+    assert_eq!(session.hash_mb(), Some(1));
+
+    let first = session.search_sync(&GoParams {
+        depth: Some(4),
+        ..GoParams::default()
+    });
+    let warm = session.search_sync(&GoParams {
+        depth: Some(4),
+        ..GoParams::default()
+    });
+    assert!(warm.nodes < first.nodes);
+
+    assert!(
+        session
+            .handle_command_sync(&UciCommand::SetOption {
+                name: "Clear Hash".to_string(),
+                value: None,
+            })
+            .is_empty()
+    );
+    let after_clear_hash = session.search_sync(&GoParams {
+        depth: Some(4),
+        ..GoParams::default()
+    });
+    assert_eq!(after_clear_hash.nodes, first.nodes);
+
+    assert!(
+        session
+            .handle_command_sync(&UciCommand::UciNewGame)
+            .is_empty()
+    );
+    let after_newgame = session.search_sync(&GoParams {
+        depth: Some(4),
+        ..GoParams::default()
+    });
+    assert_eq!(after_newgame.nodes, first.nodes);
 }
