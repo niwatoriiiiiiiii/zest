@@ -83,6 +83,9 @@ pub enum UciCommand {
     /// Display the current board state (`d`).
     Display,
 
+    /// Stop an active asynchronous search (`stop`).
+    Stop,
+
     /// Terminate the UCI loop (`quit`).
     Quit,
 }
@@ -138,6 +141,7 @@ pub fn parse_command(line: &str) -> Result<UciCommand, ParseCommandError> {
         "go" => parse_go(args),
         "eval" => Ok(UciCommand::Eval),
         "d" => Ok(UciCommand::Display),
+        "stop" => Ok(UciCommand::Stop),
         "quit" => Ok(UciCommand::Quit),
         _ => Err(ParseCommandError::UnknownCommand(cmd.to_string())),
     }

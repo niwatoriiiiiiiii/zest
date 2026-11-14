@@ -1,3 +1,5 @@
+use core::sync::atomic::AtomicBool;
+
 use crate::game::Game;
 use crate::search::{SearchResult, Searcher};
 use crate::uci::command::{GoParams, PositionSpec, UciCommand};
@@ -10,7 +12,7 @@ use crate::uci::time::compute_search_limits;
 #[derive(Debug)]
 pub struct UciSession {
     game: Game,
-    searcher: Searcher,
+    searcher: Option<Searcher>,
 }
 
 impl Default for UciSession {
@@ -25,7 +27,7 @@ impl UciSession {
     pub fn new() -> Self {
         Self {
             game: Game::new(),
-            searcher: Searcher::new(),
+            searcher: Some(Searcher::new()),
         }
     }
 
@@ -38,6 +40,17 @@ impl UciSession {
     /// Resets the active game back to the Gardner starting position.
     pub fn reset(&mut self) {
         self.game = Game::new();
+    }
+
+    /// Takes ownership of the reusable [`Searcher`] for background execution.
+    #[must_use]
+    pub fn take_searcher(&mut self) -> Searcher {
+        self.searcher.take().unwrap_or_default()
+    }
+
+    /// Returns a previously taken [`Searcher`] back to the session for reuse.
+    pub fn restore_searcher(&mut self, searcher: Searcher) {
+        self.searcher = Some(searcher);
     }
 
     /// Replaces the current position from `spec` and replays `moves` sequentially.
@@ -66,12 +79,21 @@ impl UciSession {
     /// Executes a synchronous search for `params` on the current game state.
     #[must_use]
     pub fn search_sync(&mut self, params: &GoParams) -> SearchResult {
+        let never_stop = AtomicBool::new(false);
+        self.search_with_stop(params, &never_stop)
+    }
+
+    /// Executes a search for `params` while polling `stop` for early termination.
+    #[must_use]
+    pub fn search_with_stop(&mut self, params: &GoParams, stop: &AtomicBool) -> SearchResult {
         let limits = compute_search_limits(params);
-        self.searcher.search(
+        let searcher = self.searcher.get_or_insert_with(Searcher::new);
+        searcher.search_with_stop(
             self.game.board(),
             self.game.history(),
             self.game.halfmove_clock(),
             limits,
+            stop,
         )
     }
 
@@ -96,7 +118,7 @@ impl UciSession {
             UciCommand::GoPerft(depth) => format_perft_divide(self.game.board(), *depth),
             UciCommand::Eval => format_eval(self.game.board()),
             UciCommand::Display => format_display(&self.game),
-            UciCommand::SetOption { .. } | UciCommand::Quit => Vec::new(),
+            UciCommand::SetOption { .. } | UciCommand::Stop | UciCommand::Quit => Vec::new(),
         }
     }
 }
