@@ -105,7 +105,11 @@ pub fn checkers(board: &Board) -> Bitboard {
 /// Returns `true` if the side to move's king is currently in check.
 #[must_use]
 pub fn in_check(board: &Board) -> bool {
-    !checkers(board).is_empty()
+    let us = board.side_to_move();
+    let Some(king_sq) = board.pieces_bb(us, PieceType::King).lsb() else {
+        return false;
+    };
+    is_square_attacked(board, king_sq, !us)
 }
 
 /// Returns a bitboard of all squares attacked by a knight on the given `sq`.
