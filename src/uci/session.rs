@@ -1,7 +1,9 @@
 use crate::game::Game;
 use crate::search::{SearchResult, Searcher};
 use crate::uci::command::{GoParams, PositionSpec, UciCommand};
-use crate::uci::format::{format_bestmove, format_display, format_info, format_uci_id};
+use crate::uci::format::{
+    format_bestmove, format_display, format_eval, format_info, format_perft_divide, format_uci_id,
+};
 use crate::uci::time::compute_search_limits;
 
 /// Stateful UCI session holding engine components across commands.
@@ -91,6 +93,8 @@ impl UciSession {
                 let result = self.search_sync(params);
                 vec![format_info(&result, 0), format_bestmove(&result)]
             }
+            UciCommand::GoPerft(depth) => format_perft_divide(self.game.board(), *depth),
+            UciCommand::Eval => format_eval(self.game.board()),
             UciCommand::Display => format_display(&self.game),
             UciCommand::SetOption { .. } | UciCommand::Quit => Vec::new(),
         }

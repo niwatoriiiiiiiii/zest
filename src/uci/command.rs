@@ -74,6 +74,12 @@ pub enum UciCommand {
     /// Start searching the current position (`go ...`).
     Go(GoParams),
 
+    /// Run a perft divide count on the current position (`go perft <depth>`).
+    GoPerft(usize),
+
+    /// Display static evaluation details for the current position (`eval`).
+    Eval,
+
     /// Display the current board state (`d`).
     Display,
 
@@ -130,6 +136,7 @@ pub fn parse_command(line: &str) -> Result<UciCommand, ParseCommandError> {
         "setoption" => parse_setoption(args),
         "position" => parse_position(args),
         "go" => parse_go(args),
+        "eval" => Ok(UciCommand::Eval),
         "d" => Ok(UciCommand::Display),
         "quit" => Ok(UciCommand::Quit),
         _ => Err(ParseCommandError::UnknownCommand(cmd.to_string())),
@@ -185,8 +192,19 @@ fn parse_next_int<T: std::str::FromStr>(
 }
 
 fn parse_go(args: &str) -> Result<UciCommand, ParseCommandError> {
-    let mut params = GoParams::default();
     let mut tokens = args.split_ascii_whitespace();
+    if tokens.clone().next() == Some("perft") {
+        tokens.next();
+        let depth = parse_next_int(&mut tokens, "invalid 'go perft' depth")?;
+        if tokens.next().is_some() {
+            return Err(ParseCommandError::InvalidSyntax(
+                "unexpected extra arguments after 'go perft <depth>'",
+            ));
+        }
+        return Ok(UciCommand::GoPerft(depth));
+    }
+
+    let mut params = GoParams::default();
 
     while let Some(tok) = tokens.next() {
         match tok {
