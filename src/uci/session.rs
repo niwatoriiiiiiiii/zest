@@ -37,9 +37,12 @@ impl UciSession {
         &self.game
     }
 
-    /// Resets the active game back to the Gardner starting position.
+    /// Resets the active game back to the Gardner starting position and clears the TT.
     pub fn reset(&mut self) {
         self.game = Game::new();
+        if let Some(searcher) = &mut self.searcher {
+            searcher.clear_tt();
+        }
     }
 
     /// Takes ownership of the reusable [`Searcher`] for background execution.
@@ -118,8 +121,32 @@ impl UciSession {
             UciCommand::GoPerft(depth) => format_perft_divide(self.game.board(), *depth),
             UciCommand::Eval => format_eval(self.game.board()),
             UciCommand::Display => format_display(&self.game),
-            UciCommand::SetOption { .. } | UciCommand::Stop | UciCommand::Quit => Vec::new(),
+            UciCommand::SetOption { name, value } => self.apply_setoption(name, value.as_deref()),
+            UciCommand::Stop | UciCommand::Quit => Vec::new(),
         }
+    }
+
+    /// Returns the active searcher's transposition table size in MiB.
+    #[must_use]
+    pub fn hash_mb(&self) -> Option<usize> {
+        self.searcher.as_ref().map(Searcher::hash_mb)
+    }
+
+    fn apply_setoption(&mut self, name: &str, value: Option<&str>) -> Vec<String> {
+        if name.eq_ignore_ascii_case("Hash") {
+            let Some(raw) = value else {
+                return vec!["info string Hash option requires a numeric value".to_string()];
+            };
+            let Ok(mb) = raw.parse::<usize>() else {
+                return vec![format!("info string invalid Hash value: {raw}")];
+            };
+            self.searcher
+                .get_or_insert_with(Searcher::new)
+                .set_hash_mb(mb);
+        } else if name.eq_ignore_ascii_case("Clear Hash") {
+            self.searcher.get_or_insert_with(Searcher::new).clear_tt();
+        }
+        Vec::new()
     }
 }
 

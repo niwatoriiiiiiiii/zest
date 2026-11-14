@@ -5,7 +5,9 @@ use crate::core::Color;
 use crate::eval::{MAX_PHASE, evaluate_breakdown};
 use crate::game::Game;
 use crate::movegen::generate_legal_moves;
-use crate::search::{SearchResult, is_mate_score, mate_distance_in_moves};
+use crate::search::{
+    DEFAULT_HASH_MB, MAX_HASH_MB, MIN_HASH_MB, SearchResult, is_mate_score, mate_distance_in_moves,
+};
 
 /// Formats engine identification, supported options, and `uciok`.
 #[must_use]
@@ -13,6 +15,10 @@ pub fn format_uci_id() -> Vec<String> {
     vec![
         "id name Zest".to_string(),
         "id author niwatoriiiiiiiii".to_string(),
+        format!(
+            "option name Hash type spin default {DEFAULT_HASH_MB} min {MIN_HASH_MB} max {MAX_HASH_MB}"
+        ),
+        "option name Clear Hash type button".to_string(),
         "option name UCI_Variant type combo default gardner var gardner".to_string(),
         "uciok".to_string(),
     ]
@@ -52,8 +58,8 @@ pub fn format_info(result: &SearchResult, elapsed_ms: u64) -> String {
         .unwrap_or(0);
 
     let mut line = format!(
-        "info depth {} nodes {} nps {} time {} score {}",
-        result.depth, result.nodes, nps, elapsed_ms, score_str
+        "info depth {} nodes {} nps {} hashfull {} time {} score {}",
+        result.depth, result.nodes, nps, result.hashfull, elapsed_ms, score_str
     );
 
     if !result.pv.is_empty() {

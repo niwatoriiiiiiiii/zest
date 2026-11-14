@@ -108,6 +108,9 @@ pub struct SearchResult {
     /// Total nodes visited across all iterations and quiescence calls.
     pub nodes: u64,
 
+    /// Estimated transposition table occupancy in permille (`0..=1000`).
+    pub hashfull: u16,
+
     /// Principal variation starting from the root position.
     pub pv: Vec<Move>,
 }

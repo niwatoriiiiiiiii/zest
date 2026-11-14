@@ -6,6 +6,29 @@ use crate::search::types::MAX_PLY;
 
 const DUMMY_MOVE: Move = Move::new(Square::A1, Square::A1, None);
 
+/// Per-node ply, repetition/fifty-move state, and cancellation flag passed down recursion.
+#[derive(Clone, Copy)]
+pub(super) struct NodeCtx<'a> {
+    pub(super) ply: usize,
+    pub(super) halfmove: u16,
+    pub(super) reversible_start: usize,
+    pub(super) stop: Option<&'a AtomicBool>,
+}
+
+impl NodeCtx<'_> {
+    #[inline]
+    pub(super) fn advance(self, board: &mut Board, mv: Move, path_len: usize) -> Self {
+        let (halfmove, reversible_start) =
+            advance_board_and_clock(board, mv, self.halfmove, self.reversible_start, path_len);
+        Self {
+            ply: self.ply + 1,
+            halfmove,
+            reversible_start,
+            stop: self.stop,
+        }
+    }
+}
+
 /// Mutable per-search buffers for node accounting, repetition tracking, and PV collection.
 #[derive(Debug)]
 pub(super) struct SearchState {

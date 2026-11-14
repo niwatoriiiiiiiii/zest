@@ -156,3 +156,73 @@ fn iterative_deepening_produces_legal_pv() {
         cur.make_move(*mv);
     }
 }
+
+#[test]
+fn tt_reduces_nodes_and_clear_resets_deterministically() {
+    let board = Board::gardner_initial();
+    let mut searcher = Searcher::new();
+
+    let first = searcher.search(&board, &[], 0, SearchLimits::depth(6));
+    let second = searcher.search(&board, &[], 0, SearchLimits::depth(6));
+
+    assert!(
+        second.nodes < first.nodes / 2,
+        "warm TT should prune repeated depth-6 search ({} vs {})",
+        second.nodes,
+        first.nodes
+    );
+    assert_eq!(second.best_move, first.best_move);
+    assert_eq!(second.score, first.score);
+
+    searcher.clear_tt();
+    let after_clear = searcher.search(&board, &[], 0, SearchLimits::depth(6));
+    assert_eq!(after_clear.nodes, first.nodes);
+    assert_eq!(after_clear.best_move, first.best_move);
+}
+
+#[test]
+fn tt_preserves_mate_distance_across_root_and_child_plies() {
+    let root = board_from_fen("k3r/pp3/2b2/4R/2K1Q w - - 0 1");
+    let mut after_sac = root;
+    after_sac.make_move(uci("e2e5"));
+
+    let mut searcher = Searcher::new();
+    let res_root = searcher.search(&root, &[], 0, SearchLimits::depth(4));
+    assert_eq!(res_root.best_move, Some(uci("e2e5")));
+    assert_eq!(mate_distance_in_moves(res_root.score), Some(2));
+
+    let res_child = searcher.search(&after_sac, &[], 0, SearchLimits::depth(3));
+    assert_eq!(mate_distance_in_moves(res_child.score), Some(-1));
+    assert!(
+        res_child.pv.len() >= 2,
+        "expected extended PV across TT hit, got {:?}",
+        res_child.pv
+    );
+}
+
+#[test]
+fn repetition_and_fifty_move_precedence_hold_with_warm_tt() {
+    let mut b = board_from_fen("1k3/5/5/3R1/3QK b - - 0 1");
+    let k0 = b.key();
+    b.make_move(uci("b5a5"));
+    let k1 = b.key();
+    b.make_move(uci("d2e2"));
+    let k2 = b.key();
+    b.make_move(uci("a5b5"));
+    let k3 = b.key();
+    b.make_move(uci("e2d2"));
+
+    let mut searcher = Searcher::new();
+    let non_repeating = searcher.search(&b, &[], 0, SearchLimits::depth(3));
+    assert_ne!(non_repeating.score, 0);
+
+    let repeating = searcher.search(&b, &[k0, k1, k2, k3], 4, SearchLimits::depth(2));
+    assert_eq!(repeating.best_move, Some(uci("b5a5")));
+    assert_eq!(repeating.score, 0);
+
+    let quiet_board = board_from_fen("4k/5/5/5/1Q2K w - - 0 1");
+    let warm_eval = searcher.search(&quiet_board, &[], 0, SearchLimits::depth(3));
+    assert!(warm_eval.score > 500);
+    let fifty_draw = searcher.search(&quiet_board, &[], 100, SearchLimits::depth(2));
+    assert_eq!(fifty_draw.score, 0);
+}
