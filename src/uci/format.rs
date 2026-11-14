@@ -58,8 +58,8 @@ pub fn format_info(result: &SearchResult, elapsed_ms: u64) -> String {
         .unwrap_or(0);
 
     let mut line = format!(
-        "info depth {} nodes {} nps {} time {} score {}",
-        result.depth, result.nodes, nps, elapsed_ms, score_str
+        "info depth {} nodes {} nps {} hashfull {} time {} score {}",
+        result.depth, result.nodes, nps, result.hashfull, elapsed_ms, score_str
     );
 
     if !result.pv.is_empty() {

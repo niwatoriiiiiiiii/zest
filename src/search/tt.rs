@@ -133,6 +133,24 @@ impl TranspositionTable {
         self.generation = self.generation.wrapping_add(1) & GENERATION_MASK;
     }
 
+    /// Estimates table occupancy in permille (`0..=1000`) by sampling the leading entries
+    /// written in the current search generation, matching the UCI `hashfull` convention.
+    #[must_use]
+    pub(super) fn hashfull_permille(&self) -> u16 {
+        let sample_len = self.entries.len().min(1000);
+        if sample_len == 0 {
+            return 0;
+        }
+        let used = self.entries[..sample_len]
+            .iter()
+            .filter(|entry| entry.bound() != Bound::None && entry.generation() == self.generation)
+            .count();
+        #[allow(clippy::cast_possible_truncation)]
+        {
+            ((used * 1000) / sample_len) as u16
+        }
+    }
+
     #[inline]
     pub(super) fn probe(&self, key: u64) -> Option<TtHit> {
         let idx = self.index(key);
@@ -358,5 +376,21 @@ mod tests {
 
         tt.clear();
         assert!(tt.probe(colliding_key).is_none());
+        assert_eq!(tt.hashfull_permille(), 0);
+    }
+
+    #[test]
+    fn hashfull_permille_counts_current_generation_entries() {
+        let mut tt = TranspositionTable::new(1);
+        assert_eq!(tt.hashfull_permille(), 0);
+
+        // With 1 MiB (65,536 entries), entries whose low bits are < 1000 fall in the sample window.
+        for slot_idx in 0u64..100 {
+            tt.store(slot_idx, 1, Bound::Exact, 0, None);
+        }
+        assert_eq!(tt.hashfull_permille(), 100);
+
+        tt.new_search();
+        assert_eq!(tt.hashfull_permille(), 0);
     }
 }

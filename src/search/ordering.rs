@@ -94,6 +94,7 @@ pub(super) fn order_moves(
 pub(super) fn order_tactical_moves(
     board: &Board,
     moves: &MoveList,
+    priority_move: Option<Move>,
 ) -> ([ScoredMove; MAX_MOVES], usize) {
     let mut out = [ScoredMove::EMPTY; MAX_MOVES];
     let mut len = 0;
@@ -102,7 +103,7 @@ pub(super) fn order_tactical_moves(
         if is_capture || mv.promotion().is_some() {
             out[len] = ScoredMove {
                 mv,
-                score: score_move(board, mv, None),
+                score: score_move(board, mv, priority_move),
             };
             len += 1;
         }

@@ -224,6 +224,7 @@ fn formats_search_scores_mate_and_terminal_bestmove() {
     );
     let mate_info = format_info(&mate_res, 5);
     assert!(mate_info.contains("score mate 1"), "info was: {mate_info}");
+    assert!(mate_info.contains("hashfull "), "info was: {mate_info}");
     assert_eq!(format_bestmove(&mate_res), "bestmove c1c5");
 
     session

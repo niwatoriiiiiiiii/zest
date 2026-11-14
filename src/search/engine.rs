@@ -100,6 +100,7 @@ impl Searcher {
                 score: terminal_score,
                 depth: 0,
                 nodes: 1,
+                hashfull: 0,
                 pv: Vec::new(),
             };
         }
@@ -154,6 +155,7 @@ impl Searcher {
             score: best_score,
             depth: completed_depth,
             nodes: self.state.nodes,
+            hashfull: self.tt.hashfull_permille(),
             pv: best_pv,
         }
     }
@@ -270,6 +272,7 @@ impl Searcher {
         if depth == 0 {
             return quiesce(
                 &mut self.state,
+                &mut self.tt,
                 board,
                 ply,
                 alpha,
