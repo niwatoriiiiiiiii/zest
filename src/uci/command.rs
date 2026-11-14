@@ -10,6 +10,37 @@ pub enum PositionSpec {
     Fen(String),
 }
 
+/// Parameters supplied to a `go` search command.
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
+pub struct GoParams {
+    /// Maximum iterative-deepening depth (`depth <n>`).
+    pub depth: Option<u8>,
+
+    /// Maximum visited nodes (`nodes <n>`).
+    pub nodes: Option<u64>,
+
+    /// Fixed search time in milliseconds (`movetime <ms>`).
+    pub movetime: Option<u64>,
+
+    /// White remaining clock in milliseconds (`wtime <ms>`).
+    pub wtime: Option<u64>,
+
+    /// Black remaining clock in milliseconds (`btime <ms>`).
+    pub btime: Option<u64>,
+
+    /// White time increment per move in milliseconds (`winc <ms>`).
+    pub winc: Option<u64>,
+
+    /// Black time increment per move in milliseconds (`binc <ms>`).
+    pub binc: Option<u64>,
+
+    /// Moves remaining until next time control (`movestogo <n>`).
+    pub movestogo: Option<u16>,
+
+    /// Search until an explicit `stop` command (`infinite`).
+    pub infinite: bool,
+}
+
 /// Parsed UCI command issued by a GUI, harness, or CLI user.
 #[derive(Clone, PartialEq, Eq, Debug)]
 pub enum UciCommand {
@@ -39,6 +70,9 @@ pub enum UciCommand {
         /// Sequence of UCI moves to replay from the base position.
         moves: Vec<String>,
     },
+
+    /// Start searching the current position (`go ...`).
+    Go(GoParams),
 
     /// Display the current board state (`d`).
     Display,
@@ -95,6 +129,7 @@ pub fn parse_command(line: &str) -> Result<UciCommand, ParseCommandError> {
         "ucinewgame" => Ok(UciCommand::UciNewGame),
         "setoption" => parse_setoption(args),
         "position" => parse_position(args),
+        "go" => parse_go(args),
         "d" => Ok(UciCommand::Display),
         "quit" => Ok(UciCommand::Quit),
         _ => Err(ParseCommandError::UnknownCommand(cmd.to_string())),
@@ -136,6 +171,56 @@ fn parse_position(args: &str) -> Result<UciCommand, ParseCommandError> {
     }
 
     Ok(UciCommand::Position { spec, moves })
+}
+
+fn parse_next_int<T: std::str::FromStr>(
+    tokens: &mut std::str::SplitAsciiWhitespace<'_>,
+    err_msg: &'static str,
+) -> Result<T, ParseCommandError> {
+    let raw = tokens
+        .next()
+        .ok_or(ParseCommandError::InvalidSyntax(err_msg))?;
+    raw.parse::<T>()
+        .map_err(|_| ParseCommandError::InvalidSyntax(err_msg))
+}
+
+fn parse_go(args: &str) -> Result<UciCommand, ParseCommandError> {
+    let mut params = GoParams::default();
+    let mut tokens = args.split_ascii_whitespace();
+
+    while let Some(tok) = tokens.next() {
+        match tok {
+            "depth" => {
+                params.depth = Some(parse_next_int(&mut tokens, "invalid 'go depth' value")?);
+            }
+            "nodes" => {
+                params.nodes = Some(parse_next_int(&mut tokens, "invalid 'go nodes' value")?);
+            }
+            "movetime" => {
+                params.movetime = Some(parse_next_int(&mut tokens, "invalid 'go movetime' value")?);
+            }
+            "wtime" => {
+                params.wtime = Some(parse_next_int(&mut tokens, "invalid 'go wtime' value")?);
+            }
+            "btime" => {
+                params.btime = Some(parse_next_int(&mut tokens, "invalid 'go btime' value")?);
+            }
+            "winc" => {
+                params.winc = Some(parse_next_int(&mut tokens, "invalid 'go winc' value")?);
+            }
+            "binc" => {
+                params.binc = Some(parse_next_int(&mut tokens, "invalid 'go binc' value")?);
+            }
+            "movestogo" => {
+                params.movestogo =
+                    Some(parse_next_int(&mut tokens, "invalid 'go movestogo' value")?);
+            }
+            "infinite" => params.infinite = true,
+            _ => {}
+        }
+    }
+
+    Ok(UciCommand::Go(params))
 }
 
 fn parse_setoption(args: &str) -> Result<UciCommand, ParseCommandError> {

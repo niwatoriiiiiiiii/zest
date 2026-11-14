@@ -1,10 +1,14 @@
 use crate::game::Game;
-use crate::uci::command::{PositionSpec, UciCommand};
+use crate::search::{SearchResult, Searcher};
+use crate::uci::command::{GoParams, PositionSpec, UciCommand};
+use crate::uci::format::{format_bestmove, format_display, format_info, format_uci_id};
+use crate::uci::time::compute_search_limits;
 
 /// Stateful UCI session holding engine components across commands.
 #[derive(Debug)]
 pub struct UciSession {
     game: Game,
+    searcher: Searcher,
 }
 
 impl Default for UciSession {
@@ -17,7 +21,10 @@ impl UciSession {
     /// Creates a new [`UciSession`] initialized to the Gardner starting position.
     #[must_use]
     pub fn new() -> Self {
-        Self { game: Game::new() }
+        Self {
+            game: Game::new(),
+            searcher: Searcher::new(),
+        }
     }
 
     /// Returns a reference to the active [`Game`].
@@ -54,16 +61,23 @@ impl UciSession {
         Ok(())
     }
 
+    /// Executes a synchronous search for `params` on the current game state.
+    #[must_use]
+    pub fn search_sync(&mut self, params: &GoParams) -> SearchResult {
+        let limits = compute_search_limits(params);
+        self.searcher.search(
+            self.game.board(),
+            self.game.history(),
+            self.game.halfmove_clock(),
+            limits,
+        )
+    }
+
     /// Executes a synchronous [`UciCommand`] and returns lines to write to stdout.
     #[must_use]
     pub fn handle_command_sync(&mut self, cmd: &UciCommand) -> Vec<String> {
         match cmd {
-            UciCommand::Uci => vec![
-                "id name Zest".to_string(),
-                "id author niwatoriiiiiiiii".to_string(),
-                "option name UCI_Variant type combo default gardner var gardner".to_string(),
-                "uciok".to_string(),
-            ],
+            UciCommand::Uci => format_uci_id(),
             UciCommand::IsReady => vec!["readyok".to_string()],
             UciCommand::UciNewGame => {
                 self.reset();
@@ -73,6 +87,10 @@ impl UciSession {
                 Ok(()) => Vec::new(),
                 Err(err) => vec![format!("info string {err}")],
             },
+            UciCommand::Go(params) => {
+                let result = self.search_sync(params);
+                vec![format_info(&result, 0), format_bestmove(&result)]
+            }
             UciCommand::Display => format_display(&self.game),
             UciCommand::SetOption { .. } | UciCommand::Quit => Vec::new(),
         }
@@ -86,19 +104,4 @@ fn normalize_fen(fen: &str) -> String {
     } else {
         fields.join(" ")
     }
-}
-
-fn format_display(game: &Game) -> Vec<String> {
-    let board_str = game.board().to_string();
-    let game_fen = game.to_fen();
-    board_str
-        .lines()
-        .map(|line| {
-            if line.starts_with("Fen: ") {
-                format!("Fen: {game_fen}")
-            } else {
-                line.to_string()
-            }
-        })
-        .collect()
 }
