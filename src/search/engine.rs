@@ -5,6 +5,7 @@ use crate::core::Move;
 use crate::eval::evaluate;
 use crate::movegen::{MoveList, generate_legal_moves, in_check};
 use crate::search::ordering::{order_moves, pick_next_move};
+use crate::search::quiescence::quiesce;
 use crate::search::state::{SearchState, advance_board_and_clock};
 use crate::search::types::{INF_SCORE, MAX_PLY, SearchLimits, SearchResult, mated_score_in};
 
@@ -197,6 +198,19 @@ impl Searcher {
     ) -> i32 {
         self.state.pv_len[ply] = ply;
 
+        if depth == 0 {
+            return quiesce(
+                &mut self.state,
+                board,
+                ply,
+                alpha,
+                beta,
+                halfmove_clock,
+                reversible_start,
+                stop,
+            );
+        }
+
         if self.state.check_limits(stop) {
             return 0;
         }
@@ -224,10 +238,6 @@ impl Searcher {
 
         if halfmove_clock >= 100 {
             return 0;
-        }
-
-        if depth == 0 {
-            return evaluate(board);
         }
 
         let (mut scored, len) = order_moves(board, &moves, None);

@@ -1,5 +1,6 @@
 mod engine;
 mod ordering;
+mod quiescence;
 mod state;
 mod types;
 

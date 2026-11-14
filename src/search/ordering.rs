@@ -91,6 +91,26 @@ pub(super) fn order_moves(
 }
 
 #[inline]
+pub(super) fn order_tactical_moves(
+    board: &Board,
+    moves: &MoveList,
+) -> ([ScoredMove; MAX_MOVES], usize) {
+    let mut out = [ScoredMove::EMPTY; MAX_MOVES];
+    let mut len = 0;
+    for &mv in moves.iter() {
+        let is_capture = board.piece_at(mv.to()).is_some();
+        if is_capture || mv.promotion().is_some() {
+            out[len] = ScoredMove {
+                mv,
+                score: score_move(board, mv, None),
+            };
+            len += 1;
+        }
+    }
+    (out, len)
+}
+
+#[inline]
 pub(super) fn pick_next_move(
     scored: &mut [ScoredMove; MAX_MOVES],
     start: usize,
