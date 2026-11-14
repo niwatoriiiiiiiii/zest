@@ -1,5 +1,15 @@
 use std::fmt;
 
+/// Initial board specification for a `position` command.
+#[derive(Clone, PartialEq, Eq, Debug)]
+pub enum PositionSpec {
+    /// Gardner minichess starting position (`startpos`).
+    Startpos,
+
+    /// Explicit Gardner 5x5 FEN string (`fen <fen>`).
+    Fen(String),
+}
+
 /// Parsed UCI command issued by a GUI, harness, or CLI user.
 #[derive(Clone, PartialEq, Eq, Debug)]
 pub enum UciCommand {
@@ -20,6 +30,18 @@ pub enum UciCommand {
         /// Optional option value.
         value: Option<String>,
     },
+
+    /// Set up the board position and optional move history (`position ...`).
+    Position {
+        /// Base position (`startpos` or `fen`).
+        spec: PositionSpec,
+
+        /// Sequence of UCI moves to replay from the base position.
+        moves: Vec<String>,
+    },
+
+    /// Display the current board state (`d`).
+    Display,
 
     /// Terminate the UCI loop (`quit`).
     Quit,
@@ -72,9 +94,48 @@ pub fn parse_command(line: &str) -> Result<UciCommand, ParseCommandError> {
         "isready" => Ok(UciCommand::IsReady),
         "ucinewgame" => Ok(UciCommand::UciNewGame),
         "setoption" => parse_setoption(args),
+        "position" => parse_position(args),
+        "d" => Ok(UciCommand::Display),
         "quit" => Ok(UciCommand::Quit),
         _ => Err(ParseCommandError::UnknownCommand(cmd.to_string())),
     }
+}
+
+fn parse_position(args: &str) -> Result<UciCommand, ParseCommandError> {
+    let tokens: Vec<&str> = args.split_ascii_whitespace().collect();
+    let (spec, mut idx) = match tokens.first().copied() {
+        Some("startpos") => (PositionSpec::Startpos, 1),
+        Some("fen") => {
+            let fen_end = tokens[1..]
+                .iter()
+                .position(|&tok| tok == "moves")
+                .map_or(tokens.len(), |offset| 1 + offset);
+            if fen_end == 1 {
+                return Err(ParseCommandError::InvalidSyntax(
+                    "position fen requires a FEN string",
+                ));
+            }
+            (PositionSpec::Fen(tokens[1..fen_end].join(" ")), fen_end)
+        }
+        _ => {
+            return Err(ParseCommandError::InvalidSyntax(
+                "position requires 'startpos' or 'fen'",
+            ));
+        }
+    };
+
+    let mut moves = Vec::new();
+    if let Some(&next) = tokens.get(idx) {
+        if next != "moves" {
+            return Err(ParseCommandError::InvalidSyntax(
+                "expected 'moves' after position specification",
+            ));
+        }
+        idx += 1;
+        moves.extend(tokens[idx..].iter().map(|&mv| mv.to_string()));
+    }
+
+    Ok(UciCommand::Position { spec, moves })
 }
 
 fn parse_setoption(args: &str) -> Result<UciCommand, ParseCommandError> {
