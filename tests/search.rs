@@ -228,30 +228,43 @@ fn repetition_and_fifty_move_precedence_hold_with_warm_tt() {
 }
 
 #[test]
-fn pvs_and_aspiration_reduce_startpos_nodes_without_altering_pv() {
+fn pruning_and_pvs_reduce_startpos_nodes_with_legal_pv() {
     let board = Board::gardner_initial();
     let mut searcher = Searcher::new();
     let res = searcher.search(&board, &[], 0, SearchLimits::depth(7));
 
     assert_eq!(res.depth, 7);
-    assert_eq!(res.score, 8);
-    assert_eq!(res.best_move, Some(uci("a2a3")));
-    assert_eq!(
-        res.pv,
-        vec![
-            uci("a2a3"),
-            uci("b4a3"),
-            uci("b2a3"),
-            uci("e4e3"),
-            uci("d2e3"),
-            uci("d4e3"),
-            uci("d1d5"),
-        ]
-    );
     assert!(
-        res.nodes < 23_500,
-        "expected PVS + killer/history + aspiration to prune startpos depth 7 below 23500 nodes, got {}",
+        res.score.abs() <= 50,
+        "unexpected startpos score: {}",
+        res.score
+    );
+    assert!(res.best_move.is_some());
+    assert_eq!(res.best_move, res.pv.first().copied());
+    assert!(
+        res.nodes < 16_000,
+        "expected pruning + PVS to search startpos depth 7 under 16000 nodes, got {}",
         res.nodes
+    );
+
+    let mut cur = board;
+    for mv in &res.pv {
+        assert!(generate_legal_moves(&cur).as_slice().contains(mv));
+        cur.make_move(*mv);
+    }
+}
+
+#[test]
+fn pawn_endgame_finds_promotion_mate() {
+    let board = board_from_fen("k4/3P1/3K1/5/5 w - - 0 1");
+    let mut searcher = Searcher::new();
+    let res = searcher.search(&board, &[], 0, SearchLimits::depth(6));
+
+    assert_eq!(res.depth, 6);
+    assert!(
+        is_mate_score(res.score),
+        "expected forced mate, got {}",
+        res.score
     );
 }
 

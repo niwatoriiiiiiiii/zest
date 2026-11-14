@@ -68,7 +68,7 @@ pub(super) fn quiesce(
     };
 
     for idx in 0..len {
-        let mv = pick_next_move(&mut scored, idx, len);
+        let mv = pick_next_move(board, &mut scored, idx, len);
         let mut next_board = *board;
         let child_ctx = ctx.advance(&mut next_board, mv, state.path_keys.len());
 

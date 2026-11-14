@@ -1,11 +1,13 @@
 use crate::board::Board;
 use crate::core::{Move, PieceType, Square};
 use crate::movegen::{MAX_MOVES, MoveList};
+use crate::search::see::see_ge;
 use crate::search::state::SearchState;
 
 const DUMMY_MOVE: Move = Move::new(Square::A1, Square::A1, None);
 const PRIORITY_MOVE_SCORE: i32 = 1_000_000;
 const CAPTURE_BASE_SCORE: i32 = 10_000;
+const BAD_CAPTURE_BASE_SCORE: i32 = -20_000;
 const PROMO_BASE_SCORE: i32 = 2_000;
 
 #[derive(Clone, Copy)]
@@ -21,8 +23,8 @@ impl ScoredMove {
     };
 
     #[inline]
-    pub(super) const fn mv(self) -> Move {
-        self.mv
+    pub(super) const fn score(self) -> i32 {
+        self.score
     }
 }
 
@@ -110,7 +112,10 @@ pub(super) fn order_tactical_moves(
     let mut len = 0;
     for &mv in moves.iter() {
         let is_capture = board.piece_at(mv.to()).is_some();
-        if is_capture || mv.promotion().is_some() {
+        let is_promo = mv.promotion().is_some();
+        if (is_capture || is_promo)
+            && (is_promo || priority_move == Some(mv) || see_ge(board, mv, 0))
+        {
             let score = score_tactical_or_priority(board, mv, priority_move).unwrap_or(0);
             out[len] = ScoredMove { mv, score };
             len += 1;
@@ -121,20 +126,31 @@ pub(super) fn order_tactical_moves(
 
 #[inline]
 pub(super) fn pick_next_move(
+    board: &Board,
     scored: &mut [ScoredMove; MAX_MOVES],
     start: usize,
     len: usize,
 ) -> Move {
-    let mut best_idx = start;
-    let mut best_score = scored[start].score;
-    for (i, item) in scored.iter().enumerate().take(len).skip(start + 1) {
-        if item.score > best_score {
-            best_score = item.score;
-            best_idx = i;
+    loop {
+        let mut best_idx = start;
+        let mut best_score = scored[start].score;
+        for (i, item) in scored.iter().enumerate().take(len).skip(start + 1) {
+            if item.score > best_score {
+                best_score = item.score;
+                best_idx = i;
+            }
         }
+        let item = scored[best_idx];
+        if item.score >= CAPTURE_BASE_SCORE
+            && item.score < PRIORITY_MOVE_SCORE
+            && !see_ge(board, item.mv, 0)
+        {
+            scored[best_idx].score = item.score - CAPTURE_BASE_SCORE + BAD_CAPTURE_BASE_SCORE;
+            continue;
+        }
+        scored.swap(start, best_idx);
+        return scored[start].mv;
     }
-    scored.swap(start, best_idx);
-    scored[start].mv
 }
 
 #[cfg(test)]
@@ -162,7 +178,7 @@ mod tests {
         let (mut scored, len) = order_moves(&board, &moves, Some(priority_mv), &state, 2);
         let mut ranked = Vec::with_capacity(len);
         for idx in 0..len {
-            ranked.push(pick_next_move(&mut scored, idx, len));
+            ranked.push(pick_next_move(&board, &mut scored, idx, len));
         }
 
         let pos = |mv: Move| {
