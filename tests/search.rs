@@ -226,3 +226,42 @@ fn repetition_and_fifty_move_precedence_hold_with_warm_tt() {
     let fifty_draw = searcher.search(&quiet_board, &[], 100, SearchLimits::depth(2));
     assert_eq!(fifty_draw.score, 0);
 }
+
+#[test]
+fn pvs_and_aspiration_reduce_startpos_nodes_without_altering_pv() {
+    let board = Board::gardner_initial();
+    let mut searcher = Searcher::new();
+    let res = searcher.search(&board, &[], 0, SearchLimits::depth(7));
+
+    assert_eq!(res.depth, 7);
+    assert_eq!(res.score, 8);
+    assert_eq!(res.best_move, Some(uci("a2a3")));
+    assert_eq!(
+        res.pv,
+        vec![
+            uci("a2a3"),
+            uci("b4a3"),
+            uci("b2a3"),
+            uci("e4e3"),
+            uci("d2e3"),
+            uci("d4e3"),
+            uci("d1d5"),
+        ]
+    );
+    assert!(
+        res.nodes < 23_500,
+        "expected PVS + killer/history + aspiration to prune startpos depth 7 below 23500 nodes, got {}",
+        res.nodes
+    );
+}
+
+#[test]
+fn aspiration_recovers_cleanly_on_tactical_mate_swing() {
+    let board = board_from_fen("k3r/pp3/2b2/4R/2K1Q w - - 0 1");
+    let mut searcher = Searcher::new();
+    let res = searcher.search(&board, &[], 0, SearchLimits::depth(5));
+
+    assert_eq!(res.depth, 5);
+    assert_eq!(res.best_move, Some(uci("e2e5")));
+    assert_eq!(mate_distance_in_moves(res.score), Some(2));
+}

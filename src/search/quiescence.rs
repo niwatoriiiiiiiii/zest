@@ -62,7 +62,7 @@ pub(super) fn quiesce(
     }
 
     let (mut scored, len) = if checked {
-        order_moves(board, &moves, tt_probe.best_move)
+        order_moves(board, &moves, tt_probe.best_move, state, ctx.ply)
     } else {
         order_tactical_moves(board, &moves, tt_probe.best_move)
     };

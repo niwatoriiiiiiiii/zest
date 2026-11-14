@@ -4,14 +4,20 @@ use crate::board::Board;
 use crate::core::Move;
 use crate::eval::evaluate;
 use crate::movegen::{MoveList, generate_legal_moves, in_check};
-use crate::search::ordering::{order_moves, pick_next_move};
+use crate::search::ordering::{ScoredMove, order_moves, pick_next_move};
 use crate::search::quiescence::quiesce;
-use crate::search::state::{NodeCtx, SearchState};
+use crate::search::state::{NodeCtx, SearchState, is_quiet_move};
 use crate::search::tt::{DEFAULT_HASH_MB, TranspositionTable};
 use crate::search::tt_entry::Bound;
-use crate::search::types::{INF_SCORE, MAX_PLY, SearchLimits, SearchResult, mated_score_in};
+use crate::search::types::{
+    INF_SCORE, MAX_PLY, SearchLimits, SearchResult, is_mate_score, mated_score_in,
+};
 
-/// Stateful game-tree search engine using iterative deepening and negamax alpha-beta pruning.
+const ASPIRATION_MIN_DEPTH: usize = 4;
+const ASPIRATION_INITIAL_DELTA: i32 = 50;
+const ASPIRATION_MAX_DELTA: i32 = 400;
+
+/// Stateful game-tree search engine using iterative deepening and PVS alpha-beta pruning.
 #[derive(Debug)]
 pub struct Searcher {
     state: SearchState,
@@ -51,9 +57,10 @@ impl Searcher {
         self.tt.resize(hash_mb);
     }
 
-    /// Clears all entries from the transposition table.
+    /// Clears all entries from the transposition table and search ordering heuristics.
     pub fn clear_tt(&mut self) {
         self.tt.clear();
+        self.state.clear_heuristics();
     }
 
     /// Searches `board` using `limits` with optional repetition `history` keys and `halfmove_clock`.
@@ -131,7 +138,15 @@ impl Searcher {
 
             #[allow(clippy::cast_possible_truncation)]
             let depth_u8 = depth as u8;
-            let score = self.negamax_root(board, &root_moves, depth_u8, pv_hint, root_ctx);
+            let score = self.search_aspiration(
+                board,
+                &root_moves,
+                depth,
+                depth_u8,
+                best_score,
+                &mut pv_hint,
+                root_ctx,
+            );
             if self.state.aborted {
                 break;
             }
@@ -155,6 +170,56 @@ impl Searcher {
             nodes: self.state.nodes,
             hashfull: self.tt.hashfull_permille(),
             pv: best_pv,
+        }
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn search_aspiration(
+        &mut self,
+        board: &Board,
+        root_moves: &MoveList,
+        depth: usize,
+        depth_u8: u8,
+        prev_score: i32,
+        pv_hint: &mut Option<Move>,
+        root_ctx: NodeCtx<'_>,
+    ) -> i32 {
+        let mut delta = ASPIRATION_INITIAL_DELTA;
+        let (mut alpha, mut beta) = if depth >= ASPIRATION_MIN_DEPTH && !is_mate_score(prev_score) {
+            (
+                (prev_score - delta).max(-INF_SCORE),
+                (prev_score + delta).min(INF_SCORE),
+            )
+        } else {
+            (-INF_SCORE, INF_SCORE)
+        };
+
+        loop {
+            let score =
+                self.negamax_root(board, root_moves, depth_u8, alpha, beta, *pv_hint, root_ctx);
+            if self.state.aborted {
+                return 0;
+            }
+            if score <= alpha && alpha > -INF_SCORE {
+                alpha = if is_mate_score(score) || delta >= ASPIRATION_MAX_DELTA {
+                    -INF_SCORE
+                } else {
+                    (alpha - delta).max(-INF_SCORE)
+                };
+                delta = delta.saturating_mul(2);
+            } else if score >= beta && beta < INF_SCORE {
+                if self.state.pv_len[0] > 0 {
+                    *pv_hint = Some(self.state.pv_table[0][0]);
+                }
+                beta = if is_mate_score(score) || delta >= ASPIRATION_MAX_DELTA {
+                    INF_SCORE
+                } else {
+                    (beta + delta).min(INF_SCORE)
+                };
+                delta = delta.saturating_mul(2);
+            } else {
+                return score;
+            }
         }
     }
 
@@ -186,11 +251,14 @@ impl Searcher {
         }
     }
 
+    #[allow(clippy::too_many_arguments)]
     fn negamax_root(
         &mut self,
         board: &Board,
         moves: &MoveList,
         depth: u8,
+        mut alpha: i32,
+        beta: i32,
         pv_hint: Option<Move>,
         ctx: NodeCtx<'_>,
     ) -> i32 {
@@ -204,26 +272,41 @@ impl Searcher {
             _ => pv_hint.or_else(|| tt_hit.and_then(|hit| hit.best_move)),
         };
 
-        let mut alpha = -INF_SCORE;
+        let orig_alpha = alpha;
+        let mut best_score = -INF_SCORE;
         let mut best_move = None;
-        let (mut scored, len) = order_moves(board, moves, priority_move);
+        let (mut scored, len) = order_moves(board, moves, priority_move, &self.state, 0);
 
         for idx in 0..len {
             let mv = pick_next_move(&mut scored, idx, len);
-            let score = self.search_child(board, mv, depth, alpha, INF_SCORE, ctx);
+            let score = self.search_pvs_child(board, mv, depth, idx, alpha, beta, ctx);
             if self.state.aborted {
                 return 0;
             }
-            if score > alpha {
-                alpha = score;
+            if score > best_score {
+                best_score = score;
                 best_move = Some(mv);
-                self.state.update_pv(0, mv);
+                if score > alpha {
+                    if score >= beta {
+                        self.state.update_pv(0, mv);
+                        self.tt
+                            .store_at(key, depth, Bound::Lower, best_score, 0, best_move);
+                        return best_score;
+                    }
+                    alpha = score;
+                    self.state.update_pv(0, mv);
+                }
             }
         }
 
+        let (bound, stored_move) = if best_score > orig_alpha {
+            (Bound::Exact, best_move)
+        } else {
+            (Bound::Upper, None)
+        };
         self.tt
-            .store_at(key, depth, Bound::Exact, alpha, 0, best_move);
-        alpha
+            .store_at(key, depth, bound, best_score, 0, stored_move);
+        best_score
     }
 
     fn negamax(
@@ -280,11 +363,12 @@ impl Searcher {
         let orig_alpha = alpha;
         let mut best_score = -INF_SCORE;
         let mut best_move = None;
-        let (mut scored, len) = order_moves(board, &moves, tt_probe.best_move);
+        let (mut scored, len) =
+            order_moves(board, &moves, tt_probe.best_move, &self.state, ctx.ply);
 
         for idx in 0..len {
             let mv = pick_next_move(&mut scored, idx, len);
-            let score = self.search_child(board, mv, depth, alpha, beta, ctx);
+            let score = self.search_pvs_child(board, mv, depth, idx, alpha, beta, ctx);
             if self.state.aborted {
                 return 0;
             }
@@ -293,6 +377,7 @@ impl Searcher {
                 best_move = Some(mv);
                 if score > alpha {
                     if score >= beta {
+                        self.record_quiet_cutoff(board, &scored[..idx], mv, depth, ctx.ply);
                         self.tt
                             .store_at(key, depth, Bound::Lower, best_score, ctx.ply, best_move);
                         return best_score;
@@ -314,11 +399,37 @@ impl Searcher {
     }
 
     #[inline]
-    fn search_child(
+    fn record_quiet_cutoff(
+        &mut self,
+        board: &Board,
+        tried: &[ScoredMove],
+        cutoff_move: Move,
+        depth: u8,
+        ply: usize,
+    ) {
+        if !is_quiet_move(board, cutoff_move) {
+            return;
+        }
+        let side = board.side_to_move();
+        let bonus = i32::from(depth) * i32::from(depth);
+        self.state.record_killer(ply, cutoff_move);
+        self.state.update_history(side, cutoff_move, bonus);
+        for item in tried {
+            let prev = item.mv();
+            if is_quiet_move(board, prev) {
+                self.state.update_history(side, prev, -bonus);
+            }
+        }
+    }
+
+    #[inline]
+    #[allow(clippy::too_many_arguments)]
+    fn search_pvs_child(
         &mut self,
         board: &Board,
         mv: Move,
         depth: u8,
+        move_idx: usize,
         alpha: i32,
         beta: i32,
         ctx: NodeCtx<'_>,
@@ -326,7 +437,20 @@ impl Searcher {
         let mut next_board = *board;
         let child_ctx = ctx.advance(&mut next_board, mv, self.state.path_keys.len());
         self.state.path_keys.push(next_board.key());
-        let score = -self.negamax(&next_board, depth - 1, -beta, -alpha, child_ctx);
+
+        let raw = if move_idx == 0 {
+            -self.negamax(&next_board, depth - 1, -beta, -alpha, child_ctx)
+        } else {
+            let null_score = -self.negamax(&next_board, depth - 1, -alpha - 1, -alpha, child_ctx);
+            if !self.state.aborted && null_score > alpha && null_score < beta {
+                -self.negamax(&next_board, depth - 1, -beta, -alpha, child_ctx)
+            } else {
+                null_score
+            }
+        };
+
+        // Ensure strict fail-soft return even if negated bounds collapsed on abort.
+        let score = if self.state.aborted { 0 } else { raw };
         self.state.path_keys.pop();
         score
     }
