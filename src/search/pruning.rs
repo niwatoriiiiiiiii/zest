@@ -1,16 +1,24 @@
 use crate::board::Board;
 use crate::core::Move;
+use crate::eval::evaluate;
 use crate::search::see::see_ge;
 use crate::search::state::{HISTORY_MAX, KILLER_SECOND_SCORE};
-use crate::search::types::is_mate_score;
+use crate::search::types::{MAX_PLY, is_mate_score};
 
 const MAX_RFP_DEPTH: u8 = 6;
 const RFP_MARGIN_PER_PLY: i32 = 100;
 const CAPTURE_SEE_MAX_DEPTH: u8 = 6;
 const CAPTURE_SEE_MARGIN_PER_PLY: i32 = 90;
 const LMP_MAX_DEPTH: u8 = 3;
-pub(super) const MAX_PRUNING_QUIET_DEPTH: u8 = 3;
-pub(super) const LMR_MIN_DEPTH: u8 = 3;
+const MAX_PRUNING_QUIET_DEPTH: u8 = 3;
+const LMR_MIN_DEPTH: u8 = 3;
+
+pub(super) struct PreparedNode {
+    pub(super) depth: u8,
+    pub(super) child_depth: u8,
+    pub(super) rfp_cutoff: Option<i32>,
+    pub(super) prune_ctx: MovePruneCtx,
+}
 
 #[derive(Clone, Copy)]
 pub(super) struct MovePruneCtx {
@@ -25,7 +33,34 @@ pub(super) struct MovePruneCtx {
 
 impl MovePruneCtx {
     #[inline]
-    pub(super) const fn new(
+    pub(super) fn prepare(
+        board: &Board,
+        raw_depth: u8,
+        (alpha, beta): (i32, i32),
+        is_pv: bool,
+        checked: bool,
+        has_tt_move: bool,
+        ply: usize,
+    ) -> PreparedNode {
+        let depth = if raw_depth >= 4 && !has_tt_move {
+            raw_depth - 1
+        } else {
+            raw_depth
+        };
+        let (rfp_cutoff, static_eval) = try_rfp(board, depth, beta, is_pv, checked);
+        let ext = u8::from(checked && ply < MAX_PLY / 2);
+        let child_depth = depth - 1 + ext;
+        let prune_ctx = Self::new(depth, child_depth, is_pv, checked, alpha, static_eval);
+        PreparedNode {
+            depth,
+            child_depth,
+            rfp_cutoff,
+            prune_ctx,
+        }
+    }
+
+    #[inline]
+    const fn new(
         depth: u8,
         child_depth: u8,
         is_pv: bool,
@@ -89,22 +124,37 @@ impl MovePruneCtx {
 }
 
 #[inline]
-pub(super) const fn can_rfp(depth: u8, is_pv: bool, checked: bool, beta: i32) -> bool {
+fn try_rfp(board: &Board, depth: u8, beta: i32, is_pv: bool, checked: bool) -> (Option<i32>, i32) {
+    if !is_pv
+        && !checked
+        && (can_rfp(depth, is_pv, checked, beta) || depth <= MAX_PRUNING_QUIET_DEPTH)
+    {
+        let eval = evaluate(board);
+        if can_rfp(depth, is_pv, checked, beta) && eval - rfp_margin(depth) >= beta {
+            return (Some(eval - rfp_margin(depth)), eval);
+        }
+        return (None, eval);
+    }
+    (None, 0)
+}
+
+#[inline]
+const fn can_rfp(depth: u8, is_pv: bool, checked: bool, beta: i32) -> bool {
     !is_pv && !checked && depth <= MAX_RFP_DEPTH && !is_mate_score(beta)
 }
 
 #[inline]
-pub(super) const fn rfp_margin(depth: u8) -> i32 {
+const fn rfp_margin(depth: u8) -> i32 {
     RFP_MARGIN_PER_PLY * (depth as i32)
 }
 
 #[inline]
-pub(super) const fn futility_margin(depth: u8) -> i32 {
+const fn futility_margin(depth: u8) -> i32 {
     90 * (depth as i32)
 }
 
 #[inline]
-pub(super) const fn lmp_quiet_limit(depth: u8) -> usize {
+const fn lmp_quiet_limit(depth: u8) -> usize {
     if depth > LMP_MAX_DEPTH {
         usize::MAX
     } else {

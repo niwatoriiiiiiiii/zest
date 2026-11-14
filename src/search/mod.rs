@@ -2,6 +2,7 @@ mod engine;
 mod ordering;
 mod pruning;
 mod quiescence;
+mod root;
 mod see;
 mod state;
 mod tt;
