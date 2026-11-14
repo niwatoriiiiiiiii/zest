@@ -1,34 +1,39 @@
-//! Zest CLI entry point.
+//! Zest UCI CLI entry point.
 
-use zest::board::Board;
-use zest::core::{Color, Move, PieceType, Square};
+use std::io::{self, BufRead, Write};
+
+use zest::uci::{ParseCommandError, UciCommand, UciSession, parse_command};
 
 fn main() {
-    let c = Color::White;
-    let sq = Square::new(0, 0).unwrap(); // a1
-    println!("Color: {:?}, Opposite: {:?}", c, c.opposite());
-    println!("Square: {:?} (file={}, rank={})", sq, sq.file(), sq.rank());
-    println!("Piece: {}", PieceType::Pawn.to_char());
+    run_uci_loop();
+}
 
-    let mut board = Board::gardner_initial();
-    println!("----- Initial position -----");
-    println!("{board}");
+fn run_uci_loop() {
+    let stdin = io::stdin();
+    let stdout = io::stdout();
+    let mut out = stdout.lock();
+    let mut session = UciSession::new();
 
-    // 1. c2c3
-    let m1 = Move::new(Square::C2, Square::C3, None);
-    println!("White plays: {m1}");
-    board.make_move(m1);
-    println!("{board}");
-    println!("Side to move: {:?}", board.side_to_move());
+    for line in stdin.lock().lines() {
+        let Ok(line) = line else { break };
 
-    println!();
-    println!("----------------------------");
-    println!();
+        let cmd = match parse_command(&line) {
+            Ok(cmd) => cmd,
+            Err(ParseCommandError::EmptyLine) => continue,
+            Err(err) => {
+                let _ = writeln!(out, "info string {err}");
+                let _ = out.flush();
+                continue;
+            }
+        };
 
-    // 2. d4c3
-    let m2 = Move::new(Square::D4, Square::C3, None);
-    println!("Black plays: {m2}");
-    board.make_move(m2);
-    println!("{board}");
-    println!("Side to move: {:?}", board.side_to_move());
+        if matches!(cmd, UciCommand::Quit) {
+            break;
+        }
+
+        for response in session.handle_command_sync(&cmd) {
+            let _ = writeln!(out, "{response}");
+        }
+        let _ = out.flush();
+    }
 }

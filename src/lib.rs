@@ -18,4 +18,7 @@ pub mod search;
 /// Game state management, move history, and draw/termination rules.
 pub mod game;
 
+/// Universal Chess Interface (UCI) protocol support.
+pub mod uci;
+
 mod display;
