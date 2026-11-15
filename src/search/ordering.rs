@@ -14,17 +14,29 @@ const PROMO_BASE_SCORE: i32 = 2_000;
 pub(super) struct ScoredMove {
     mv: Move,
     score: i32,
+    quiet: bool,
 }
 
 impl ScoredMove {
     pub(super) const EMPTY: Self = Self {
         mv: DUMMY_MOVE,
         score: 0,
+        quiet: false,
     };
+
+    #[inline]
+    pub(super) const fn mv(self) -> Move {
+        self.mv
+    }
 
     #[inline]
     pub(super) const fn score(self) -> i32 {
         self.score
+    }
+
+    #[inline]
+    pub(super) const fn is_quiet(self) -> bool {
+        self.quiet
     }
 }
 
@@ -63,16 +75,21 @@ const fn promo_bonus(pt: PieceType) -> i32 {
 }
 
 #[inline]
-fn score_tactical_or_priority(board: &Board, mv: Move, priority_move: Option<Move>) -> Option<i32> {
+fn score_tactical_or_priority(
+    board: &Board,
+    mv: Move,
+    priority_move: Option<Move>,
+    victim: Option<PieceType>,
+) -> Option<i32> {
     if priority_move == Some(mv) {
         return Some(PRIORITY_MOVE_SCORE);
     }
 
-    let capture_score = board.piece_at(mv.to()).map(|victim| {
+    let capture_score = victim.map(|victim_pt| {
         let attacker_rank = board
             .piece_at(mv.from())
             .map_or(6, |p| lva_rank(p.piece_type));
-        CAPTURE_BASE_SCORE + mvv_value(victim.piece_type) * 16 - attacker_rank
+        CAPTURE_BASE_SCORE + mvv_value(victim_pt) * 16 - attacker_rank
     });
     let promo_score = mv.promotion().map(promo_bonus);
     match (capture_score, promo_score) {
@@ -95,9 +112,11 @@ pub(super) fn order_moves(
     let len = moves.len();
     let side = board.side_to_move();
     for (dst, &mv) in out[..len].iter_mut().zip(moves.iter()) {
-        let score = score_tactical_or_priority(board, mv, priority_move)
+        let victim = board.piece_at(mv.to()).map(|p| p.piece_type);
+        let quiet = victim.is_none() && mv.promotion().is_none();
+        let score = score_tactical_or_priority(board, mv, priority_move, victim)
             .unwrap_or_else(|| state.quiet_move_score(side, ply, mv));
-        *dst = ScoredMove { mv, score };
+        *dst = ScoredMove { mv, score, quiet };
     }
     (out, len)
 }
@@ -111,17 +130,45 @@ pub(super) fn order_tactical_moves(
     let mut out = [ScoredMove::EMPTY; MAX_MOVES];
     let mut len = 0;
     for &mv in moves.iter() {
-        let is_capture = board.piece_at(mv.to()).is_some();
+        let victim = board.piece_at(mv.to()).map(|p| p.piece_type);
         let is_promo = mv.promotion().is_some();
-        if (is_capture || is_promo)
+        if (victim.is_some() || is_promo)
             && (is_promo || priority_move == Some(mv) || see_ge(board, mv, 0))
         {
-            let score = score_tactical_or_priority(board, mv, priority_move).unwrap_or(0);
-            out[len] = ScoredMove { mv, score };
+            let score = score_tactical_or_priority(board, mv, priority_move, victim).unwrap_or(0);
+            out[len] = ScoredMove {
+                mv,
+                score,
+                quiet: false,
+            };
             len += 1;
         }
     }
     (out, len)
+}
+
+#[inline]
+fn select_best_idx(scored: &[ScoredMove; MAX_MOVES], start: usize, len: usize) -> usize {
+    let mut best_idx = start;
+    let mut best_score = scored[start].score;
+    for (i, item) in scored.iter().enumerate().take(len).skip(start + 1) {
+        if item.score > best_score {
+            best_score = item.score;
+            best_idx = i;
+        }
+    }
+    best_idx
+}
+
+#[inline]
+pub(super) fn pick_next_scored(
+    scored: &mut [ScoredMove; MAX_MOVES],
+    start: usize,
+    len: usize,
+) -> ScoredMove {
+    let best_idx = select_best_idx(scored, start, len);
+    scored.swap(start, best_idx);
+    scored[start]
 }
 
 #[inline]
@@ -130,16 +177,9 @@ pub(super) fn pick_next_move(
     scored: &mut [ScoredMove; MAX_MOVES],
     start: usize,
     len: usize,
-) -> Move {
+) -> ScoredMove {
     loop {
-        let mut best_idx = start;
-        let mut best_score = scored[start].score;
-        for (i, item) in scored.iter().enumerate().take(len).skip(start + 1) {
-            if item.score > best_score {
-                best_score = item.score;
-                best_idx = i;
-            }
-        }
+        let best_idx = select_best_idx(scored, start, len);
         let item = scored[best_idx];
         if item.score >= CAPTURE_BASE_SCORE
             && item.score < PRIORITY_MOVE_SCORE
@@ -149,7 +189,7 @@ pub(super) fn pick_next_move(
             continue;
         }
         scored.swap(start, best_idx);
-        return scored[start].mv;
+        return scored[start];
     }
 }
 
@@ -178,7 +218,7 @@ mod tests {
         let (mut scored, len) = order_moves(&board, &moves, Some(priority_mv), &state, 2);
         let mut ranked = Vec::with_capacity(len);
         for idx in 0..len {
-            ranked.push(pick_next_move(&board, &mut scored, idx, len));
+            ranked.push(pick_next_move(&board, &mut scored, idx, len).mv());
         }
 
         let pos = |mv: Move| {

@@ -3,14 +3,41 @@ use core::sync::atomic::AtomicBool;
 use crate::board::Board;
 use crate::core::Move;
 use crate::eval::evaluate;
-use crate::movegen::{MoveList, generate_legal_moves, in_check};
+use crate::movegen::{MoveList, generate_legal_moves, gives_check, in_check, is_legal_move};
 use crate::search::ordering::{order_moves, pick_next_move};
 use crate::search::pruning::{MovePruneCtx, PreparedNode, lmr_reduction};
 use crate::search::quiescence::quiesce;
 use crate::search::state::{NodeCtx, SearchState, is_quiet_move};
 use crate::search::tt::{DEFAULT_HASH_MB, TranspositionTable};
 use crate::search::tt_entry::Bound;
-use crate::search::types::{INF_SCORE, MAX_PLY, SearchLimits, SearchResult, mated_score_in};
+use crate::search::types::{
+    INF_SCORE, MAX_PLY, SearchLimits, SearchResult, is_mate_score, mated_score_in,
+};
+
+struct NodeSearch {
+    orig_alpha: i32,
+    alpha: i32,
+    best_score: i32,
+    best_move: Option<Move>,
+    quiet_count: usize,
+    searched_quiets: MoveList,
+    skip_move: Option<Move>,
+}
+
+impl NodeSearch {
+    #[inline]
+    const fn new(alpha: i32) -> Self {
+        Self {
+            orig_alpha: alpha,
+            alpha,
+            best_score: -INF_SCORE,
+            best_move: None,
+            quiet_count: 0,
+            searched_quiets: MoveList::new(),
+            skip_move: None,
+        }
+    }
+}
 
 /// Stateful game-tree search engine using iterative deepening, PVS, and pruning heuristics.
 #[derive(Debug)]
@@ -119,115 +146,256 @@ impl Searcher {
         }
 
         let checked = in_check(board);
-        let moves = generate_legal_moves(board);
-        if moves.is_empty() {
-            return if checked { mated_score_in(ctx.ply) } else { 0 };
-        }
-        if ctx.halfmove >= 100 {
+        if !checked && ctx.halfmove >= 100 {
             return 0;
         }
 
+        let static_eval = (!checked).then(|| evaluate(board));
         let prep = MovePruneCtx::prepare(
-            board,
             depth,
             (alpha, beta),
             is_pv,
-            checked,
+            static_eval,
             tt_probe.best_move.is_some(),
             ctx.ply,
         );
         if let Some(score) = prep.rfp_cutoff {
             return score;
         }
+        if let Some(score) = self.try_null_move(board, prep.depth, beta, is_pv, static_eval, ctx) {
+            return score;
+        }
 
-        self.search_children(board, &moves, &prep, tt_probe.best_move, (alpha, beta), ctx)
+        self.search_children(
+            board,
+            &prep,
+            tt_probe.best_move,
+            (alpha, beta),
+            checked,
+            ctx,
+        )
     }
 
+    #[inline]
+    fn try_null_move(
+        &mut self,
+        board: &Board,
+        depth: u8,
+        beta: i32,
+        is_pv: bool,
+        static_eval: Option<i32>,
+        ctx: NodeCtx<'_>,
+    ) -> Option<i32> {
+        let eval = static_eval?;
+        if is_pv
+            || !ctx.allow_null
+            || depth < 4
+            || eval < beta + 20
+            || is_mate_score(beta)
+            || !board.has_non_pawn_material(board.side_to_move())
+        {
+            return None;
+        }
+
+        let eval_bonus = u8::from(eval - beta >= 180);
+        let r = 2 + depth / 5 + eval_bonus;
+        let null_depth = depth.saturating_sub(1 + r).max(1);
+
+        let mut null_board = *board;
+        null_board.make_null_move();
+        let null_ctx = ctx.advance_null(self.state.path_keys.len());
+        self.state.path_keys.push(null_board.key());
+        let mut null_score = -self.negamax(&null_board, null_depth, -beta, -beta + 1, null_ctx);
+        self.state.path_keys.pop();
+
+        if self.state.aborted || null_score < beta {
+            return None;
+        }
+        if is_mate_score(null_score) {
+            null_score = beta;
+        }
+        if depth >= 8 {
+            let verify_ctx = NodeCtx {
+                allow_null: false,
+                ..ctx
+            };
+            let verified = self.negamax(board, null_depth, beta - 1, beta, verify_ctx);
+            if self.state.aborted || verified < beta {
+                return None;
+            }
+            return Some(if is_mate_score(verified) {
+                beta
+            } else {
+                verified
+            });
+        }
+        Some(null_score)
+    }
+
+    #[allow(clippy::too_many_arguments)]
     fn search_children(
         &mut self,
         board: &Board,
-        moves: &MoveList,
         prep: &PreparedNode,
         tt_move: Option<Move>,
-        (mut alpha, beta): (i32, i32),
+        (alpha, beta): (i32, i32),
+        checked: bool,
         ctx: NodeCtx<'_>,
     ) -> i32 {
         let key = board.key();
-        let orig_alpha = alpha;
-        let mut best_score = -INF_SCORE;
-        let mut best_move = None;
-        let mut quiet_count = 0usize;
-        let mut searched_quiets = MoveList::new();
-        let (mut scored, len) = order_moves(board, moves, tt_move, &self.state, ctx.ply);
+        let mut node = NodeSearch::new(alpha);
+        if let Some(cutoff) = self.try_tt_move(board, prep, tt_move, beta, checked, ctx, &mut node)
+        {
+            return cutoff;
+        }
+
+        let mut moves = generate_legal_moves(board);
+        if moves.is_empty() {
+            return if checked { mated_score_in(ctx.ply) } else { 0 };
+        }
+        if ctx.halfmove >= 100 {
+            return 0;
+        }
+        let start_idx = usize::from(node.skip_move.is_some());
+        if let Some(tt_mv) = node.skip_move {
+            moves.retain(|&mv| mv != tt_mv);
+        }
+        let (mut scored, len) = order_moves(board, &moves, None, &self.state, ctx.ply);
 
         for idx in 0..len {
-            let mv = pick_next_move(board, &mut scored, idx, len);
-            let quiet = is_quiet_move(board, mv);
+            let move_idx = start_idx + idx;
+            let item = pick_next_move(board, &mut scored, idx, len);
+            let mv = item.mv();
+            let quiet = item.is_quiet();
             if quiet {
-                quiet_count += 1;
+                node.quiet_count += 1;
             }
 
             let (prunable, lmr_candidate) =
                 prep.prune_ctx
-                    .classify(board, mv, idx, quiet, quiet_count, scored[idx].score());
-            let mut next_board = *board;
-            let child_ctx = ctx.advance(&mut next_board, mv, self.state.path_keys.len());
-            let gives_check = (prunable || lmr_candidate) && in_check(&next_board);
-            if prunable && !gives_check {
+                    .classify(board, mv, move_idx, quiet, node.quiet_count, item.score());
+            let checks = (prunable || lmr_candidate) && gives_check(board, mv);
+            if prunable && !checks {
                 continue;
             }
 
-            let prior_quiets = searched_quiets.len();
+            let prior_quiets = node.searched_quiets.len();
             if quiet {
-                searched_quiets.push(mv);
+                node.searched_quiets.push(mv);
             }
 
-            let red = if lmr_candidate && !gives_check {
+            let red = if lmr_candidate && !checks {
                 lmr_reduction(
                     prep.depth,
                     prep.child_depth,
-                    idx,
+                    move_idx,
                     prep.prune_ctx.is_pv,
-                    scored[idx].score(),
+                    item.score(),
                 )
             } else {
                 0
             };
+            let mut next_board = *board;
+            let child_ctx = ctx.advance(&mut next_board, mv, self.state.path_keys.len());
             let score = self.search_window(
                 &next_board,
                 prep.child_depth,
                 red,
-                idx == 0,
-                (alpha, beta),
+                move_idx == 0,
+                (node.alpha, beta),
                 child_ctx,
             );
             if self.state.aborted {
                 return 0;
             }
 
-            if score > best_score {
-                best_score = score;
-                best_move = Some(mv);
-                if score > alpha {
+            if score > node.best_score {
+                node.best_score = score;
+                node.best_move = Some(mv);
+                if score > node.alpha {
                     if score >= beta {
                         self.record_beta_cutoff(
                             board,
                             key,
                             prep.depth,
-                            best_score,
-                            &searched_quiets.as_slice()[..prior_quiets],
+                            node.best_score,
+                            &node.searched_quiets.as_slice()[..prior_quiets],
                             mv,
                             ctx.ply,
                         );
-                        return best_score;
+                        return node.best_score;
                     }
-                    alpha = score;
+                    node.alpha = score;
                     self.state.update_pv(ctx.ply, mv);
                 }
             }
         }
 
-        self.store_node_result(key, prep.depth, best_score, orig_alpha, best_move, ctx.ply)
+        self.store_node_result(
+            key,
+            prep.depth,
+            node.best_score,
+            node.orig_alpha,
+            node.best_move,
+            ctx.ply,
+        )
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn try_tt_move(
+        &mut self,
+        board: &Board,
+        prep: &PreparedNode,
+        tt_move: Option<Move>,
+        beta: i32,
+        checked: bool,
+        ctx: NodeCtx<'_>,
+        node: &mut NodeSearch,
+    ) -> Option<i32> {
+        let tt_mv = tt_move?;
+        if !is_legal_move(board, tt_mv) {
+            return None;
+        }
+        if checked && ctx.halfmove >= 100 {
+            return Some(0);
+        }
+        node.skip_move = Some(tt_mv);
+        if is_quiet_move(board, tt_mv) {
+            node.quiet_count = 1;
+            node.searched_quiets.push(tt_mv);
+        }
+        let mut next_board = *board;
+        let child_ctx = ctx.advance(&mut next_board, tt_mv, self.state.path_keys.len());
+        let score = self.search_window(
+            &next_board,
+            prep.child_depth,
+            0,
+            true,
+            (node.alpha, beta),
+            child_ctx,
+        );
+        if self.state.aborted {
+            return Some(0);
+        }
+        node.best_score = score;
+        node.best_move = Some(tt_mv);
+        if score > node.alpha {
+            if score >= beta {
+                self.record_beta_cutoff(
+                    board,
+                    board.key(),
+                    prep.depth,
+                    node.best_score,
+                    &[],
+                    tt_mv,
+                    ctx.ply,
+                );
+                return Some(node.best_score);
+            }
+            node.alpha = score;
+            self.state.update_pv(ctx.ply, tt_mv);
+        }
+        None
     }
 
     #[inline]

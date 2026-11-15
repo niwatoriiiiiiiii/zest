@@ -53,8 +53,8 @@ impl TranspositionTable {
     fn alloc_table(hash_mb: usize) -> (Vec<TtEntry>, usize, usize) {
         let clamped_mb = hash_mb.clamp(MIN_HASH_MB, MAX_HASH_MB);
         let max_entries = clamped_mb.saturating_mul(BYTES_PER_MIB) / size_of::<TtEntry>();
-        let len = if max_entries <= 1 {
-            1
+        let len = if max_entries <= 2 {
+            2
         } else {
             1usize << max_entries.ilog2()
         };
@@ -106,17 +106,19 @@ impl TranspositionTable {
 
     #[inline]
     pub(super) fn probe(&self, key: u64) -> Option<TtHit> {
-        let entry = self.entries[self.index(key)];
-        let bound = entry.bound();
-        if bound == Bound::None || entry.key != key {
-            return None;
+        let base = self.bucket_base(key);
+        for slot in &self.entries[base..base + 2] {
+            let bound = slot.bound();
+            if bound != Bound::None && slot.key == key {
+                return Some(TtHit {
+                    best_move: unpack_move(slot.best_move),
+                    score: i32::from(slot.score),
+                    depth: slot.depth,
+                    bound,
+                });
+            }
         }
-        Some(TtHit {
-            best_move: unpack_move(entry.best_move),
-            score: i32::from(entry.score),
-            depth: entry.depth,
-            bound,
-        })
+        None
     }
 
     #[inline]
@@ -186,8 +188,9 @@ impl TranspositionTable {
     ) {
         debug_assert_ne!(bound, Bound::None);
 
-        let idx = self.index(key);
+        let base = self.bucket_base(key);
         let generation = self.generation;
+        let idx = self.select_bucket_slot(base, key, generation);
         let slot = &mut self.entries[idx];
         let existing_bound = slot.bound();
         let same_key = existing_bound != Bound::None && slot.key == key;
@@ -221,10 +224,33 @@ impl TranspositionTable {
     }
 
     #[inline]
-    const fn index(&self, key: u64) -> usize {
+    fn select_bucket_slot(&self, base: usize, key: u64, generation: u8) -> usize {
+        let s0 = self.entries[base];
+        let b0 = s0.bound();
+        if b0 != Bound::None && s0.key == key {
+            return base;
+        }
+        let s1 = self.entries[base + 1];
+        let b1 = s1.bound();
+        if b1 != Bound::None && s1.key == key {
+            return base + 1;
+        }
+        if b0 == Bound::None {
+            return base;
+        }
+        if b1 == Bound::None {
+            return base + 1;
+        }
+        let age0 = u16::from(s0.generation() != generation) * 256 + u16::from(u8::MAX - s0.depth);
+        let age1 = u16::from(s1.generation() != generation) * 256 + u16::from(u8::MAX - s1.depth);
+        if age0 >= age1 { base } else { base + 1 }
+    }
+
+    #[inline]
+    const fn bucket_base(&self, key: u64) -> usize {
         #[allow(clippy::cast_possible_truncation)]
         {
-            (key as usize) & self.mask
+            (key as usize) & (self.mask & !1)
         }
     }
 }
@@ -254,14 +280,19 @@ mod tests {
         tt.new_search();
         let colliding_key = key ^ (1u64 << 40);
         tt.store(colliding_key, 1, Bound::Lower, -40, None);
-        assert!(tt.probe(key).is_none());
+        assert!(tt.probe(key).is_some(), "second bucket slot preserves key");
         assert_eq!(
             tt.probe(colliding_key).map(|h| (h.depth, h.score)),
             Some((1, -40))
         );
 
+        let colliding_key2 = key ^ (2u64 << 40);
+        tt.store(colliding_key2, 2, Bound::Lower, 20, None);
+        assert!(tt.probe(key).is_none(), "older generation entry aged out");
+        assert!(tt.probe(colliding_key2).is_some());
+
         tt.clear();
-        assert!(tt.probe(colliding_key).is_none());
+        assert!(tt.probe(colliding_key2).is_none());
         assert_eq!(tt.hashfull_permille(), 0);
     }
 

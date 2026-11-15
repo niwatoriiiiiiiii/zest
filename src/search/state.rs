@@ -20,6 +20,7 @@ pub(super) struct NodeCtx<'a> {
     pub(super) ply: usize,
     pub(super) halfmove: u16,
     pub(super) reversible_start: usize,
+    pub(super) allow_null: bool,
     pub(super) stop: Option<&'a AtomicBool>,
 }
 
@@ -32,6 +33,18 @@ impl NodeCtx<'_> {
             ply: self.ply + 1,
             halfmove,
             reversible_start,
+            allow_null: true,
+            stop: self.stop,
+        }
+    }
+
+    #[inline]
+    pub(super) const fn advance_null(self, path_len: usize) -> Self {
+        Self {
+            ply: self.ply + 1,
+            halfmove: self.halfmove,
+            reversible_start: path_len,
+            allow_null: false,
             stop: self.stop,
         }
     }

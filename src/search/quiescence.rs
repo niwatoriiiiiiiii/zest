@@ -1,7 +1,9 @@
 use crate::board::Board;
 use crate::eval::evaluate;
-use crate::movegen::{generate_legal_moves, in_check};
-use crate::search::ordering::{order_moves, order_tactical_moves, pick_next_move};
+use crate::movegen::{generate_legal_moves, generate_tactical_moves, in_check};
+use crate::search::ordering::{
+    order_moves, order_tactical_moves, pick_next_move, pick_next_scored,
+};
 use crate::search::state::{NodeCtx, SearchState};
 use crate::search::tt::TranspositionTable;
 use crate::search::tt_entry::Bound;
@@ -36,20 +38,23 @@ pub(super) fn quiesce(
     }
 
     let checked = in_check(board);
-    let moves = generate_legal_moves(board);
-    if moves.is_empty() {
-        return if checked { mated_score_in(ctx.ply) } else { 0 };
-    }
-
-    if ctx.halfmove >= 100 {
-        return 0;
-    }
-
     let orig_alpha = alpha;
     let mut best_score = -INF_SCORE;
     let mut best_move = None;
 
-    if !checked {
+    let (mut scored, len) = if checked {
+        let moves = generate_legal_moves(board);
+        if moves.is_empty() {
+            return mated_score_in(ctx.ply);
+        }
+        if ctx.halfmove >= 100 {
+            return 0;
+        }
+        order_moves(board, &moves, tt_probe.best_move, state, ctx.ply)
+    } else {
+        if ctx.halfmove >= 100 {
+            return 0;
+        }
         let stand_pat = evaluate(board);
         if stand_pat >= beta {
             tt.store_at(key, 0, Bound::Lower, stand_pat, ctx.ply, None);
@@ -59,16 +64,17 @@ pub(super) fn quiesce(
         if stand_pat > alpha {
             alpha = stand_pat;
         }
-    }
-
-    let (mut scored, len) = if checked {
-        order_moves(board, &moves, tt_probe.best_move, state, ctx.ply)
-    } else {
+        let moves = generate_tactical_moves(board);
         order_tactical_moves(board, &moves, tt_probe.best_move)
     };
 
     for idx in 0..len {
-        let mv = pick_next_move(board, &mut scored, idx, len);
+        let item = if checked {
+            pick_next_move(board, &mut scored, idx, len)
+        } else {
+            pick_next_scored(&mut scored, idx, len)
+        };
+        let mv = item.mv();
         let mut next_board = *board;
         let child_ctx = ctx.advance(&mut next_board, mv, state.path_keys.len());
 

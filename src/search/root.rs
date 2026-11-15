@@ -57,6 +57,7 @@ impl Searcher {
             ply: 0,
             halfmove: halfmove_clock,
             reversible_start: 0,
+            allow_null: true,
             stop,
         };
 
@@ -207,7 +208,7 @@ impl Searcher {
         let (mut scored, len) = order_moves(board, moves, priority_move, &self.state, 0);
 
         for idx in 0..len {
-            let mv = pick_next_move(board, &mut scored, idx, len);
+            let mv = pick_next_move(board, &mut scored, idx, len).mv();
             let mut next_board = *board;
             let child_ctx = ctx.advance(&mut next_board, mv, self.state.path_keys.len());
             let score = self.search_window(

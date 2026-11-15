@@ -1,6 +1,5 @@
 use crate::board::Board;
 use crate::core::Move;
-use crate::eval::evaluate;
 use crate::search::see::see_ge;
 use crate::search::state::{HISTORY_MAX, KILLER_SECOND_SCORE};
 use crate::search::types::{MAX_PLY, is_mate_score};
@@ -33,24 +32,28 @@ pub(super) struct MovePruneCtx {
 
 impl MovePruneCtx {
     #[inline]
-    pub(super) fn prepare(
-        board: &Board,
+    pub(super) const fn prepare(
         raw_depth: u8,
         (alpha, beta): (i32, i32),
         is_pv: bool,
-        checked: bool,
+        static_eval: Option<i32>,
         has_tt_move: bool,
         ply: usize,
     ) -> PreparedNode {
+        let checked = static_eval.is_none();
         let depth = if raw_depth >= 4 && !has_tt_move {
             raw_depth - 1
         } else {
             raw_depth
         };
-        let (rfp_cutoff, static_eval) = try_rfp(board, depth, beta, is_pv, checked);
-        let ext = u8::from(checked && ply < MAX_PLY / 2);
+        let eval = match static_eval {
+            Some(v) => v,
+            None => 0,
+        };
+        let rfp_cutoff = try_rfp(depth, beta, is_pv, checked, eval);
+        let ext = if checked && ply < MAX_PLY / 2 { 1 } else { 0 };
         let child_depth = depth - 1 + ext;
-        let prune_ctx = Self::new(depth, child_depth, is_pv, checked, alpha, static_eval);
+        let prune_ctx = Self::new(depth, child_depth, is_pv, checked, alpha, eval);
         PreparedNode {
             depth,
             child_depth,
@@ -116,26 +119,24 @@ impl MovePruneCtx {
                 mv,
                 -CAPTURE_SEE_MARGIN_PER_PLY * i32::from(self.depth),
             );
-        let lmr_node = !self.checked && self.depth >= LMR_MIN_DEPTH && self.child_depth >= 2;
-        let bad_capture = !quiet && move_score < 0 && mv.promotion().is_none();
-        let lmr_candidate = lmr_node && (quiet || bad_capture) && idx >= 2;
+        let lmr_candidate =
+            quiet && self.depth >= LMR_MIN_DEPTH && self.child_depth >= 2 && idx >= 2;
         (prunable_quiet || see_prunable, lmr_candidate)
     }
 }
 
 #[inline]
-fn try_rfp(board: &Board, depth: u8, beta: i32, is_pv: bool, checked: bool) -> (Option<i32>, i32) {
-    if !is_pv
-        && !checked
-        && (can_rfp(depth, is_pv, checked, beta) || depth <= MAX_PRUNING_QUIET_DEPTH)
-    {
-        let eval = evaluate(board);
-        if can_rfp(depth, is_pv, checked, beta) && eval - rfp_margin(depth) >= beta {
-            return (Some(eval - rfp_margin(depth)), eval);
-        }
-        return (None, eval);
+const fn try_rfp(
+    depth: u8,
+    beta: i32,
+    is_pv: bool,
+    checked: bool,
+    static_eval: i32,
+) -> Option<i32> {
+    if can_rfp(depth, is_pv, checked, beta) && static_eval - rfp_margin(depth) >= beta {
+        return Some(static_eval - rfp_margin(depth));
     }
-    (None, 0)
+    None
 }
 
 #[inline]
