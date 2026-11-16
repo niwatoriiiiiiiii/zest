@@ -2,7 +2,7 @@ use core::sync::atomic::AtomicBool;
 
 use crate::board::Board;
 use crate::core::Move;
-use crate::eval::evaluate;
+use crate::eval::evaluate_with_acc;
 use crate::movegen::{MoveList, generate_legal_moves, in_check};
 use crate::search::engine::Searcher;
 use crate::search::ordering::{order_moves, pick_next_move};
@@ -42,12 +42,12 @@ impl Searcher {
             };
         }
 
-        self.state.reset(board.key(), history, limits.max_nodes);
+        self.state.reset(board, history, limits.max_nodes);
         self.tt.new_search();
 
         let fallback_move = root_moves[0];
         let mut best_move = fallback_move;
-        let mut best_score = evaluate(board);
+        let mut best_score = evaluate_with_acc(board, &mut self.state.nnue_acc, 0);
         let mut completed_depth = 0u8;
         let mut best_pv = vec![fallback_move];
         let mut pv_hint = None;
@@ -214,6 +214,7 @@ impl Searcher {
 
         for idx in 0..len {
             let mv = pick_next_move(board, &mut scored, idx, len).mv();
+            self.state.nnue_acc.push_move(ctx.ply + 1, board, mv);
             let mut next_board = *board;
             let child_ctx = ctx.advance(&mut next_board, mv, self.state.path_keys.len());
             let score = self.search_window(

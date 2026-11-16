@@ -9,17 +9,32 @@ pub const TEMPO_BONUS: i32 = 10;
 
 const PASSED_PAWN_BONUS: [Score; 5] = [
     Score::ZERO,
-    Score::new(6, 10),
-    Score::new(18, 28),
-    Score::new(40, 62),
+    Score::new(4, 4),
+    Score::new(21, 56),
+    Score::new(53, 66),
     Score::ZERO,
 ];
 
-const ISOLATED_PAWN_PENALTY: Score = Score::new(-8, -12);
-const DOUBLED_PAWN_PENALTY: Score = Score::new(-8, -10);
+const PASSED_FREE_ADVANCE_BONUS: [Score; 5] = [
+    Score::ZERO,
+    Score::new(17, 0),
+    Score::new(18, 4),
+    Score::new(21, 0),
+    Score::ZERO,
+];
+
+const KING_PASSER_ENEMY_BONUS: Score = Score::new(10, 19);
+const KING_PASSER_OWN_BONUS: Score = Score::new(6, 13);
+const PAWN_PHALANX_BONUS: Score = Score::new(47, 38);
+const MINOR_PAWN_SUPPORT_BONUS: Score = Score::new(39, 0);
+const PAWN_THREAT_NON_PAWN_BONUS: Score = Score::new(70, 13);
+const QUEEN_TROPISM_BONUS: Score = Score::new(33, 14);
+
+const ISOLATED_PAWN_PENALTY: Score = Score::new(-18, -10);
+const DOUBLED_PAWN_PENALTY: Score = Score::new(-4, -10);
 const BISHOP_PAIR_BONUS: Score = Score::new(15, 25);
-const ROOK_OPEN_FILE_BONUS: Score = Score::new(16, 12);
-const ROOK_SEMI_OPEN_FILE_BONUS: Score = Score::new(8, 6);
+const ROOK_OPEN_FILE_BONUS: Score = Score::new(64, 24);
+const ROOK_SEMI_OPEN_FILE_BONUS: Score = Score::new(32, 11);
 
 /// Broadcasts a 5-bit file mask across all 5 ranks without carry overlap (`bit r*5 + f`).
 const FILE_BROADCAST_MULTIPLIER: u32 = (1 << 20) | (1 << 15) | (1 << 10) | (1 << 5) | 1;
@@ -76,6 +91,64 @@ const PASSED_PAWN_SCORES: [[Score; 25]; 2] = {
             sq_i += 1;
         }
         c_i += 1;
+    }
+    table
+};
+
+const PASSED_FREE_ADVANCE_SCORES: [[Score; 25]; 2] = {
+    let mut table = [[Score::ZERO; 25]; 2];
+    let colors = [Color::White, Color::Black];
+    let mut c_i = 0;
+    while c_i < 2 {
+        let color = colors[c_i];
+        let mut sq_i = 0;
+        while sq_i < 25 {
+            #[allow(clippy::cast_possible_truncation)]
+            let sq = Square::from_index(sq_i as u8).expect("valid square index");
+            let rel_rank = relative_square_index(color, sq) / 5;
+            table[color.index()][sq_i] = PASSED_FREE_ADVANCE_BONUS[rel_rank];
+            sq_i += 1;
+        }
+        c_i += 1;
+    }
+    table
+};
+
+const PAWN_ADVANCE_MASK: [[Bitboard; 25]; 2] = {
+    let mut table = [[Bitboard::EMPTY; 25]; 2];
+    let mut sq_i = 0;
+    while sq_i < 25 {
+        if sq_i + 5 < 25 {
+            table[Color::White.index()][sq_i] = Bitboard::from_raw(1u32 << (sq_i + 5));
+        }
+        if sq_i >= 5 {
+            table[Color::Black.index()][sq_i] = Bitboard::from_raw(1u32 << (sq_i - 5));
+        }
+        sq_i += 1;
+    }
+    table
+};
+
+const CHEBYSHEV_DIST: [[i32; 25]; 25] = {
+    let mut table = [[0i32; 25]; 25];
+    let mut a = 0;
+    while a < 25 {
+        #[allow(clippy::cast_possible_truncation, clippy::cast_possible_wrap)]
+        let af = (a % 5) as i32;
+        #[allow(clippy::cast_possible_truncation, clippy::cast_possible_wrap)]
+        let ar = (a / 5) as i32;
+        let mut b = 0;
+        while b < 25 {
+            #[allow(clippy::cast_possible_truncation, clippy::cast_possible_wrap)]
+            let bf = (b % 5) as i32;
+            #[allow(clippy::cast_possible_truncation, clippy::cast_possible_wrap)]
+            let br = (b / 5) as i32;
+            let df = (af - bf).abs();
+            let dr = (ar - br).abs();
+            table[a][b] = if df > dr { df } else { dr };
+            b += 1;
+        }
+        a += 1;
     }
     table
 };
@@ -179,26 +252,89 @@ fn sum_baked_psqt(mut bb: Bitboard, table: &[Score; 25]) -> Score {
 }
 
 #[inline]
-fn evaluate_side(board: &Board, color: Color, own_files: u32, enemy_files: u32) -> (Score, i32) {
-    let c_idx = color.index();
-    let own_pawns = board.pieces_bb(color, PieceType::Pawn);
-    let enemy_pawns = board.pieces_bb(color.opposite(), PieceType::Pawn);
+const fn scale_signed(unit: Score, factor: i32) -> Score {
+    Score::new(unit.mg * factor, unit.eg * factor)
+}
 
-    // Pawns: baked PSQT + passed pawn bonus + SWAR doubled/isolated penalties
+#[inline]
+const fn pawn_attacks_raw(pawns_raw: u32, color: Color) -> u32 {
+    const NOT_FILE_A: u32 = !0x0010_8421;
+    const NOT_FILE_E: u32 = !0x0108_4210;
+    match color {
+        Color::White => {
+            (((pawns_raw & NOT_FILE_A) << 4) | ((pawns_raw & NOT_FILE_E) << 6)) & 0x01FF_FFFF
+        }
+        Color::Black => ((pawns_raw & NOT_FILE_E) >> 4) | ((pawns_raw & NOT_FILE_A) >> 6),
+    }
+}
+
+#[inline]
+#[allow(clippy::too_many_arguments)]
+fn evaluate_pawns(
+    board: &Board,
+    color: Color,
+    own_files: u32,
+    own_pawns: Bitboard,
+    enemy_pawns: Bitboard,
+    own_king_sq: Option<Square>,
+    enemy_king_sq: Option<Square>,
+    own_pawn_atk: u32,
+) -> Score {
+    const NOT_FILE_E: u32 = !0x0108_4210;
+    let c_idx = color.index();
+    let enemy = color.opposite();
+    let occupied = board.occupied();
     let mut score = Score::ZERO;
     let mut pawn_bb = own_pawns;
     let passed_masks = &PASSED_PAWN_MASKS[c_idx];
     let passed_scores = &PASSED_PAWN_SCORES[c_idx];
+    let passed_free_scores = &PASSED_FREE_ADVANCE_SCORES[c_idx];
+    let advance_masks = &PAWN_ADVANCE_MASK[c_idx];
     let pawn_psqt = &BAKED_PSQT[PieceType::Pawn.index()][c_idx];
     while let Some(sq) = pawn_bb.pop_lsb() {
         let idx = sq.index();
         score += pawn_psqt[idx];
         if !enemy_pawns.intersects(passed_masks[idx]) {
             score += passed_scores[idx];
+            if !occupied.intersects(advance_masks[idx]) {
+                score += passed_free_scores[idx];
+            }
+            let rel_rank = relative_square_index(color, sq) / 5;
+            if rel_rank >= 2 {
+                #[allow(clippy::cast_possible_truncation, clippy::cast_possible_wrap)]
+                let r_scale = (rel_rank - 1) as i32;
+                let promo_idx = match color {
+                    Color::White => 20 + (idx % 5),
+                    Color::Black => idx % 5,
+                };
+                if let Some(ek) = enemy_king_sq {
+                    score += scale_signed(
+                        KING_PASSER_ENEMY_BONUS,
+                        r_scale * (CHEBYSHEV_DIST[ek.index()][promo_idx] - 2),
+                    );
+                }
+                if let Some(ok) = own_king_sq {
+                    score += scale_signed(
+                        KING_PASSER_OWN_BONUS,
+                        r_scale * (2 - CHEBYSHEV_DIST[ok.index()][idx]),
+                    );
+                }
+            }
         }
     }
 
     let p_raw = own_pawns.as_raw();
+    let phalanx_count = (p_raw & ((p_raw & NOT_FILE_E) << 1)).count_ones();
+    if phalanx_count > 0 {
+        score += scale_score(PAWN_PHALANX_BONUS, phalanx_count);
+    }
+
+    let enemy_non_pawns = board.color_bb(enemy).as_raw() & !enemy_pawns.as_raw();
+    let threat_count = (own_pawn_atk & enemy_non_pawns).count_ones();
+    if threat_count > 0 {
+        score += scale_score(PAWN_THREAT_NON_PAWN_BONUS, threat_count);
+    }
+
     let doubled_count = (p_raw & pawn_below_mask(p_raw)).count_ones();
     if doubled_count > 0 {
         score += scale_score(DOUBLED_PAWN_PENALTY, doubled_count);
@@ -211,18 +347,57 @@ fn evaluate_side(board: &Board, color: Color, own_files: u32, enemy_files: u32) 
         score += scale_score(ISOLATED_PAWN_PENALTY, isolated_count);
     }
 
-    // Knights
+    score
+}
+
+#[derive(Clone, Copy)]
+struct SideEvalCtx {
+    color: Color,
+    own_pawns: Bitboard,
+    enemy_pawns: Bitboard,
+    own_files: u32,
+    enemy_files: u32,
+    own_pawn_atk: u32,
+    own_king_sq: Option<Square>,
+    enemy_king_sq: Option<Square>,
+}
+
+#[inline]
+fn evaluate_side(board: &Board, ctx: SideEvalCtx) -> (Score, i32) {
+    let color = ctx.color;
+    let c_idx = color.index();
+
+    let mut score = evaluate_pawns(
+        board,
+        color,
+        ctx.own_files,
+        ctx.own_pawns,
+        ctx.enemy_pawns,
+        ctx.own_king_sq,
+        ctx.enemy_king_sq,
+        ctx.own_pawn_atk,
+    );
+
+    // Knights & Bishops (+ pair + pawn outpost support + bishop mobility)
     let knights = board.pieces_bb(color, PieceType::Knight);
     score += sum_baked_psqt(knights, &BAKED_PSQT[PieceType::Knight.index()][c_idx]);
 
-    // Bishops (+ pair bonus)
     let bishops = board.pieces_bb(color, PieceType::Bishop);
-    score += sum_baked_psqt(bishops, &BAKED_PSQT[PieceType::Bishop.index()][c_idx]);
+    let bishop_psqt = &BAKED_PSQT[PieceType::Bishop.index()][c_idx];
+    let mut bishop_bb = bishops;
+    while let Some(sq) = bishop_bb.pop_lsb() {
+        score += bishop_psqt[sq.index()];
+    }
     if bishops.count() >= 2 {
         score += BISHOP_PAIR_BONUS;
     }
 
-    // Rooks (+ open / semi-open file bonuses via 5-bit file masks)
+    let defended_minors = ((knights.as_raw() | bishops.as_raw()) & ctx.own_pawn_atk).count_ones();
+    if defended_minors > 0 {
+        score += scale_score(MINOR_PAWN_SUPPORT_BONUS, defended_minors);
+    }
+
+    // Rooks (+ open / semi-open file bonuses via 5-bit file masks + mobility)
     let rooks = board.pieces_bb(color, PieceType::Rook);
     let rook_psqt = &BAKED_PSQT[PieceType::Rook.index()][c_idx];
     let mut rook_bb = rooks;
@@ -230,8 +405,8 @@ fn evaluate_side(board: &Board, color: Color, own_files: u32, enemy_files: u32) 
         let idx = sq.index();
         score += rook_psqt[idx];
         let file_bit = FILE_BIT_BY_SQ[idx];
-        if (own_files & file_bit) == 0 {
-            if (enemy_files & file_bit) == 0 {
+        if (ctx.own_files & file_bit) == 0 {
+            if (ctx.enemy_files & file_bit) == 0 {
                 score += ROOK_OPEN_FILE_BONUS;
             } else {
                 score += ROOK_SEMI_OPEN_FILE_BONUS;
@@ -239,9 +414,20 @@ fn evaluate_side(board: &Board, color: Color, own_files: u32, enemy_files: u32) 
         }
     }
 
-    // Queens & King
+    // Queens (+ king tropism + mobility) & King
     let queens = board.pieces_bb(color, PieceType::Queen);
-    score += sum_baked_psqt(queens, &BAKED_PSQT[PieceType::Queen.index()][c_idx]);
+    let queen_psqt = &BAKED_PSQT[PieceType::Queen.index()][c_idx];
+    let mut queen_bb = queens;
+    while let Some(sq) = queen_bb.pop_lsb() {
+        let idx = sq.index();
+        score += queen_psqt[idx];
+        if let Some(ek) = ctx.enemy_king_sq {
+            let trop = 3 - CHEBYSHEV_DIST[idx][ek.index()];
+            if trop > 0 {
+                score += scale_signed(QUEEN_TROPISM_BONUS, trop);
+            }
+        }
+    }
 
     let kings = board.pieces_bb(color, PieceType::King);
     score += sum_baked_psqt(kings, &BAKED_PSQT[PieceType::King.index()][c_idx]);
@@ -256,15 +442,54 @@ fn evaluate_side(board: &Board, color: Color, own_files: u32, enemy_files: u32) 
     (score, phase)
 }
 
-/// Evaluates the given `board` and returns a full [`EvalBreakdown`].
-#[must_use]
 #[inline]
-pub fn evaluate_breakdown(board: &Board) -> EvalBreakdown {
-    let white_files = pawn_files_mask(board.pieces_bb(Color::White, PieceType::Pawn).as_raw());
-    let black_files = pawn_files_mask(board.pieces_bb(Color::Black, PieceType::Pawn).as_raw());
+fn nnue_scale(board: &Board) -> i32 {
+    (board.occupied().as_raw() & !board.piece_type_bb(PieceType::King).as_raw())
+        .count_ones()
+        .saturating_sub(1)
+        .min(4)
+        .cast_signed()
+}
 
-    let (white, white_phase) = evaluate_side(board, Color::White, white_files, black_files);
-    let (black, black_phase) = evaluate_side(board, Color::Black, black_files, white_files);
+#[inline]
+fn evaluate_breakdown_core(board: &Board, scale: i32, (nn_w, nn_b): (i32, i32)) -> EvalBreakdown {
+    let white_pawns = board.pieces_bb(Color::White, PieceType::Pawn);
+    let black_pawns = board.pieces_bb(Color::Black, PieceType::Pawn);
+    let white_files = pawn_files_mask(white_pawns.as_raw());
+    let black_files = pawn_files_mask(black_pawns.as_raw());
+    let white_pawn_atk = pawn_attacks_raw(white_pawns.as_raw(), Color::White);
+    let black_pawn_atk = pawn_attacks_raw(black_pawns.as_raw(), Color::Black);
+    let white_king_sq = board.pieces_bb(Color::White, PieceType::King).lsb();
+    let black_king_sq = board.pieces_bb(Color::Black, PieceType::King).lsb();
+
+    let (white, white_phase) = evaluate_side(
+        board,
+        SideEvalCtx {
+            color: Color::White,
+            own_pawns: white_pawns,
+            enemy_pawns: black_pawns,
+            own_files: white_files,
+            enemy_files: black_files,
+            own_pawn_atk: white_pawn_atk,
+            own_king_sq: white_king_sq,
+            enemy_king_sq: black_king_sq,
+        },
+    );
+    let (black, black_phase) = evaluate_side(
+        board,
+        SideEvalCtx {
+            color: Color::Black,
+            own_pawns: black_pawns,
+            enemy_pawns: white_pawns,
+            own_files: black_files,
+            enemy_files: white_files,
+            own_pawn_atk: black_pawn_atk,
+            own_king_sq: black_king_sq,
+            enemy_king_sq: white_king_sq,
+        },
+    );
+    let white = white + Score::new((nn_w * scale) / 4, (nn_w * scale) / 4);
+    let black = black + Score::new((nn_b * scale) / 4, (nn_b * scale) / 4);
     let phase = (white_phase + black_phase).min(MAX_PHASE);
 
     let net = white - black;
@@ -281,6 +506,34 @@ pub fn evaluate_breakdown(board: &Board) -> EvalBreakdown {
         tempo: TEMPO_BONUS,
         total: positional + TEMPO_BONUS,
     }
+}
+
+/// Evaluates the given `board` and returns a full [`EvalBreakdown`].
+#[must_use]
+#[inline]
+pub fn evaluate_breakdown(board: &Board) -> EvalBreakdown {
+    let scale = nnue_scale(board);
+    let nn_res = if scale == 0 {
+        (0, 0)
+    } else {
+        crate::eval::nnue::evaluate_nnue_residual(board)
+    };
+    evaluate_breakdown_core(board, scale, nn_res)
+}
+
+/// Evaluates `board` in centipawns from the side-to-move perspective using an incremental [`AccStack`](crate::eval::AccStack).
+#[must_use]
+#[inline]
+pub fn evaluate_with_acc(board: &Board, acc: &mut crate::eval::nnue::AccStack, ply: usize) -> i32 {
+    let scale = nnue_scale(board);
+    let nn_res = if scale == 0 {
+        (0, 0)
+    } else {
+        let res = acc.evaluate_residual(board, ply);
+        debug_assert_eq!(res, crate::eval::nnue::evaluate_nnue_residual(board));
+        res
+    };
+    evaluate_breakdown_core(board, scale, nn_res).total
 }
 
 /// Returns the static evaluation of `board` in centipawns from the side-to-move perspective.

@@ -1,5 +1,5 @@
 use crate::board::Board;
-use crate::eval::evaluate;
+use crate::eval::evaluate_with_acc;
 use crate::movegen::{generate_legal_moves, generate_tactical_moves, gives_check, in_check};
 use crate::search::ordering::{
     mvv_value, order_moves, order_tactical_moves, pick_next_move, pick_next_scored,
@@ -35,7 +35,7 @@ pub(super) fn quiesce(
     state.nodes += 1;
 
     if ctx.ply >= MAX_PLY {
-        return evaluate(board);
+        return evaluate_with_acc(board, &mut state.nnue_acc, ctx.ply);
     }
 
     let key = board.key();
@@ -67,7 +67,9 @@ pub(super) fn quiesce(
         if ctx.halfmove >= 100 {
             return 0;
         }
-        let stand_pat = tt_probe.static_eval.unwrap_or_else(|| evaluate(board));
+        let stand_pat = tt_probe
+            .static_eval
+            .unwrap_or_else(|| evaluate_with_acc(board, &mut state.nnue_acc, ctx.ply));
         static_eval = Some(stand_pat);
         if stand_pat >= beta {
             tt.store_at(key, 0, Bound::Lower, stand_pat, ctx.ply, None, static_eval);
@@ -93,6 +95,7 @@ pub(super) fn quiesce(
         {
             continue;
         }
+        state.nnue_acc.push_move(ctx.ply + 1, board, mv);
         let mut next_board = *board;
         let child_ctx = ctx.advance(&mut next_board, mv, state.path_keys.len());
 
