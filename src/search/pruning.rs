@@ -9,7 +9,9 @@ const RFP_MARGIN_PER_PLY: i32 = 100;
 const CAPTURE_SEE_MAX_DEPTH: u8 = 6;
 const CAPTURE_SEE_MARGIN_PER_PLY: i32 = 90;
 const LMP_MAX_DEPTH: u8 = 3;
-const MAX_PRUNING_QUIET_DEPTH: u8 = 3;
+const MAX_PRUNING_QUIET_DEPTH: u8 = 5;
+const HISTORY_PRUNE_MAX_DEPTH: u8 = 4;
+const HISTORY_PRUNE_MARGIN: i32 = 150;
 const LMR_MIN_DEPTH: u8 = 3;
 
 pub(super) struct PreparedNode {
@@ -108,12 +110,14 @@ impl MovePruneCtx {
         best_score: i32,
     ) -> (bool, bool) {
         let can_prune = self.can_prune && !is_mate_score(self.alpha) && !is_mate_score(best_score);
+        let hist_prunable = self.depth <= HISTORY_PRUNE_MAX_DEPTH
+            && move_score < HISTORY_MAX - HISTORY_PRUNE_MARGIN * i32::from(self.depth);
         let prunable_quiet = can_prune
             && self.depth <= MAX_PRUNING_QUIET_DEPTH
             && quiet
             && idx > 0
             && move_score < KILLER_SECOND_SCORE
-            && (self.futility_active || quiet_count > self.lmp_limit);
+            && (self.futility_active || quiet_count > self.lmp_limit || hist_prunable);
         let see_prunable = !quiet
             && can_prune
             && idx > 0

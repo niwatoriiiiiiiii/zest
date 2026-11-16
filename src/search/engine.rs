@@ -238,7 +238,7 @@ impl Searcher {
         if is_mate_score(null_score) {
             null_score = beta;
         }
-        if depth >= 8 {
+        if depth >= 12 {
             let prev_nmp_min = self.state.nmp_min_ply;
             self.state.nmp_min_ply = ctx.ply + (3 * usize::from(null_depth)) / 4;
             let verify_ctx = NodeCtx {
