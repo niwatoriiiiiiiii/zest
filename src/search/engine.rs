@@ -1,7 +1,7 @@
 use core::sync::atomic::AtomicBool;
 
 use crate::board::Board;
-use crate::core::Move;
+use crate::core::{Color, Move, PieceType};
 use crate::eval::evaluate;
 use crate::movegen::{MoveList, generate_legal_moves, gives_check, in_check, is_legal_move};
 use crate::search::ordering::{order_moves, pick_next_move};
@@ -150,11 +150,31 @@ impl Searcher {
             return 0;
         }
 
-        let static_eval = (!checked).then(|| evaluate(board));
+        let mut static_eval = (!checked).then_some(tt_probe.static_eval).flatten();
+        let need_eval = !checked
+            && !is_pv
+            && (depth <= 7
+                || (ctx.allow_null
+                    && !is_mate_score(beta)
+                    && board.has_non_pawn_material(board.side_to_move())));
+        if need_eval && static_eval.is_none() {
+            static_eval = Some(evaluate(board));
+        }
+        self.state.eval_stack[ctx.ply] = static_eval;
+        let improving = !checked
+            && static_eval.is_some_and(|cur| {
+                (ctx.ply >= 2 && self.state.eval_stack[ctx.ply - 2].is_some_and(|prev| cur > prev))
+                    || (ctx.ply >= 4
+                        && self.state.eval_stack[ctx.ply - 2].is_none()
+                        && self.state.eval_stack[ctx.ply - 4].is_some_and(|prev| cur > prev))
+            });
+        let imminent_promo =
+            (board.pieces_bb(Color::White, PieceType::Pawn).as_raw() & 0x000F_8000) != 0
+                || (board.pieces_bb(Color::Black, PieceType::Pawn).as_raw() & 0x0000_03E0) != 0;
         let prep = MovePruneCtx::prepare(
             depth,
             (alpha, beta),
-            is_pv,
+            (checked, is_pv, !imminent_promo, improving),
             static_eval,
             tt_probe.best_move.is_some(),
             ctx.ply,
@@ -162,7 +182,9 @@ impl Searcher {
         if let Some(score) = prep.rfp_cutoff {
             return score;
         }
-        if let Some(score) = self.try_null_move(board, prep.depth, beta, is_pv, static_eval, ctx) {
+        if let Some(score) =
+            self.try_null_move(board, prep.depth, beta, is_pv, prep.static_eval, ctx)
+        {
             return score;
         }
 
@@ -189,6 +211,7 @@ impl Searcher {
         let eval = static_eval?;
         if is_pv
             || !ctx.allow_null
+            || ctx.ply < self.state.nmp_min_ply
             || depth < 4
             || eval < beta + 20
             || is_mate_score(beta)
@@ -215,11 +238,14 @@ impl Searcher {
             null_score = beta;
         }
         if depth >= 8 {
+            let prev_nmp_min = self.state.nmp_min_ply;
+            self.state.nmp_min_ply = ctx.ply + (3 * usize::from(null_depth)) / 4;
             let verify_ctx = NodeCtx {
                 allow_null: false,
                 ..ctx
             };
             let verified = self.negamax(board, null_depth, beta - 1, beta, verify_ctx);
+            self.state.nmp_min_ply = prev_nmp_min;
             if self.state.aborted || verified < beta {
                 return None;
             }
@@ -271,9 +297,15 @@ impl Searcher {
                 node.quiet_count += 1;
             }
 
-            let (prunable, lmr_candidate) =
-                prep.prune_ctx
-                    .classify(board, mv, move_idx, quiet, node.quiet_count, item.score());
+            let (prunable, lmr_candidate) = prep.prune_ctx.classify(
+                board,
+                mv,
+                move_idx,
+                quiet,
+                node.quiet_count,
+                item.score(),
+                node.best_score,
+            );
             let checks = (prunable || lmr_candidate) && gives_check(board, mv);
             if prunable && !checks {
                 continue;
@@ -289,7 +321,7 @@ impl Searcher {
                     prep.depth,
                     prep.child_depth,
                     move_idx,
-                    prep.prune_ctx.is_pv,
+                    (beta - alpha > 1, prep.prune_ctx.improving),
                     item.score(),
                 )
             } else {
@@ -319,6 +351,7 @@ impl Searcher {
                             key,
                             prep.depth,
                             node.best_score,
+                            prep.static_eval,
                             &node.searched_quiets.as_slice()[..prior_quiets],
                             mv,
                             ctx.ply,
@@ -337,6 +370,7 @@ impl Searcher {
             node.best_score,
             node.orig_alpha,
             node.best_move,
+            prep.static_eval,
             ctx.ply,
         )
     }
@@ -386,6 +420,7 @@ impl Searcher {
                     board.key(),
                     prep.depth,
                     node.best_score,
+                    prep.static_eval,
                     &[],
                     tt_mv,
                     ctx.ply,
@@ -399,6 +434,7 @@ impl Searcher {
     }
 
     #[inline]
+    #[allow(clippy::too_many_arguments)]
     pub(super) fn store_node_result(
         &mut self,
         key: u64,
@@ -406,6 +442,7 @@ impl Searcher {
         best_score: i32,
         orig_alpha: i32,
         best_move: Option<Move>,
+        static_eval: Option<i32>,
         ply: usize,
     ) -> i32 {
         let (bound, stored_move) = if best_score > orig_alpha {
@@ -414,7 +451,7 @@ impl Searcher {
             (Bound::Upper, None)
         };
         self.tt
-            .store_at(key, depth, bound, best_score, ply, stored_move);
+            .store_at(key, depth, bound, best_score, ply, stored_move, static_eval);
         best_score
     }
 
@@ -426,13 +463,21 @@ impl Searcher {
         key: u64,
         depth: u8,
         best_score: i32,
+        static_eval: Option<i32>,
         tried_quiets: &[Move],
         cutoff_move: Move,
         ply: usize,
     ) {
         self.record_quiet_cutoff(board, tried_quiets, cutoff_move, depth, ply);
-        self.tt
-            .store_at(key, depth, Bound::Lower, best_score, ply, Some(cutoff_move));
+        self.tt.store_at(
+            key,
+            depth,
+            Bound::Lower,
+            best_score,
+            ply,
+            Some(cutoff_move),
+            static_eval,
+        );
     }
 
     #[inline]

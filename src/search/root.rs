@@ -53,10 +53,15 @@ impl Searcher {
         let mut pv_hint = None;
 
         let max_depth = usize::from(limits.max_depth.unwrap_or(64)).clamp(1, MAX_PLY);
+        let root_reversible_start = self
+            .state
+            .path_keys
+            .len()
+            .saturating_sub(1 + usize::from(halfmove_clock));
         let root_ctx = NodeCtx {
             ply: 0,
             halfmove: halfmove_clock,
-            reversible_start: 0,
+            reversible_start: root_reversible_start,
             allow_null: true,
             stop,
         };
@@ -228,8 +233,15 @@ impl Searcher {
                 if score > alpha {
                     if score >= beta {
                         self.state.update_pv(0, mv);
-                        self.tt
-                            .store_at(key, depth, Bound::Lower, best_score, 0, best_move);
+                        self.tt.store_at(
+                            key,
+                            depth,
+                            Bound::Lower,
+                            best_score,
+                            0,
+                            best_move,
+                            tt_hit.and_then(|hit| hit.eval),
+                        );
                         return best_score;
                     }
                     alpha = score;
@@ -238,6 +250,14 @@ impl Searcher {
             }
         }
 
-        self.store_node_result(key, depth, best_score, orig_alpha, best_move, 0)
+        self.store_node_result(
+            key,
+            depth,
+            best_score,
+            orig_alpha,
+            best_move,
+            tt_hit.and_then(|hit| hit.eval),
+            0,
+        )
     }
 }

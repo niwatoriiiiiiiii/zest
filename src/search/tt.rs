@@ -1,6 +1,6 @@
 use crate::core::Move;
 use crate::search::tt_entry::{
-    Bound, GENERATION_MASK, TtEntry, adjust_mate_score, pack_move, unpack_move,
+    Bound, EVAL_NONE, GENERATION_MASK, TtEntry, adjust_mate_score, pack_move, unpack_move,
 };
 
 /// Default transposition table size in megabytes.
@@ -19,6 +19,7 @@ const BYTES_PER_MIB: usize = 1024 * 1024;
 pub(super) struct TtHit {
     pub(super) best_move: Option<Move>,
     pub(super) score: i32,
+    pub(super) eval: Option<i32>,
     pub(super) depth: u8,
     pub(super) bound: Bound,
 }
@@ -28,6 +29,7 @@ pub(super) struct TtHit {
 pub(super) struct TtProbe {
     pub(super) cutoff: Option<(i32, bool)>,
     pub(super) best_move: Option<Move>,
+    pub(super) static_eval: Option<i32>,
 }
 
 /// Fixed-bucket power-of-two Zobrist transposition table.
@@ -113,6 +115,7 @@ impl TranspositionTable {
                 return Some(TtHit {
                     best_move: unpack_move(slot.best_move),
                     score: i32::from(slot.score),
+                    eval: (slot.eval != EVAL_NONE).then(|| i32::from(slot.eval)),
                     depth: slot.depth,
                     bound,
                 });
@@ -135,13 +138,16 @@ impl TranspositionTable {
             return TtProbe {
                 cutoff: None,
                 best_move: None,
+                static_eval: None,
             };
         };
         let best_move = hit.best_move;
+        let static_eval = hit.eval;
         if halfmove_clock >= 100 || hit.depth < depth {
             return TtProbe {
                 cutoff: None,
                 best_move,
+                static_eval,
             };
         }
 
@@ -155,10 +161,12 @@ impl TranspositionTable {
         TtProbe {
             cutoff: can_cut.then_some((tt_score, hit.bound == Bound::Exact)),
             best_move,
+            static_eval,
         }
     }
 
     #[inline]
+    #[allow(clippy::too_many_arguments)]
     pub(super) fn store_at(
         &mut self,
         key: u64,
@@ -167,6 +175,7 @@ impl TranspositionTable {
         score: i32,
         ply: usize,
         best_move: Option<Move>,
+        static_eval: Option<i32>,
     ) {
         self.store(
             key,
@@ -174,6 +183,7 @@ impl TranspositionTable {
             bound,
             adjust_mate_score(score, ply, true),
             best_move,
+            static_eval,
         );
     }
 
@@ -185,6 +195,7 @@ impl TranspositionTable {
         bound: Bound,
         score: i32,
         best_move: Option<Move>,
+        static_eval: Option<i32>,
     ) {
         debug_assert_ne!(bound, Bound::None);
 
@@ -200,6 +211,10 @@ impl TranspositionTable {
             None if same_key => slot.best_move,
             None => 0,
         };
+        #[allow(clippy::cast_possible_truncation)]
+        let packed_eval = static_eval.map_or(EVAL_NONE, |eval| {
+            eval.clamp(i32::from(EVAL_NONE) + 1, i32::from(i16::MAX)) as i16
+        });
 
         let should_replace = existing_bound == Bound::None
             || if same_key {
@@ -209,17 +224,30 @@ impl TranspositionTable {
             };
 
         if should_replace {
+            let final_eval = if packed_eval != EVAL_NONE {
+                packed_eval
+            } else if same_key {
+                slot.eval
+            } else {
+                EVAL_NONE
+            };
             #[allow(clippy::cast_possible_truncation)]
             let clamped_score = score.clamp(i32::from(i16::MIN), i32::from(i16::MAX)) as i16;
             *slot = TtEntry {
                 key,
                 best_move: packed_move,
                 score: clamped_score,
+                eval: final_eval,
                 depth,
                 meta: TtEntry::pack_meta(bound, generation),
             };
-        } else if same_key && slot.best_move == 0 && packed_move != 0 {
-            slot.best_move = packed_move;
+        } else if same_key {
+            if slot.best_move == 0 && packed_move != 0 {
+                slot.best_move = packed_move;
+            }
+            if slot.eval == EVAL_NONE && packed_eval != EVAL_NONE {
+                slot.eval = packed_eval;
+            }
         }
     }
 
@@ -266,20 +294,23 @@ mod tests {
         let key = 0x1234_5678_9ABC_DEF0;
         let mv = Move::new(Square::C2, Square::C3, None);
 
-        tt.store(key, 4, Bound::Exact, 120, Some(mv));
+        tt.store(key, 4, Bound::Exact, 120, Some(mv), Some(42));
         let hit = tt.probe(key).expect("entry should be present");
         assert_eq!(
-            (hit.best_move, hit.score, hit.depth, hit.bound),
-            (Some(mv), 120, 4, Bound::Exact)
+            (hit.best_move, hit.score, hit.eval, hit.depth, hit.bound),
+            (Some(mv), 120, Some(42), 4, Bound::Exact)
         );
 
-        tt.store(key, 2, Bound::Upper, 50, None);
+        tt.store(key, 2, Bound::Upper, 50, None, None);
         let kept = tt.probe(key).expect("deeper exact entry preserved");
-        assert_eq!((kept.best_move, kept.score, kept.depth), (Some(mv), 120, 4));
+        assert_eq!(
+            (kept.best_move, kept.score, kept.eval, kept.depth),
+            (Some(mv), 120, Some(42), 4)
+        );
 
         tt.new_search();
         let colliding_key = key ^ (1u64 << 40);
-        tt.store(colliding_key, 1, Bound::Lower, -40, None);
+        tt.store(colliding_key, 1, Bound::Lower, -40, None, None);
         assert!(tt.probe(key).is_some(), "second bucket slot preserves key");
         assert_eq!(
             tt.probe(colliding_key).map(|h| (h.depth, h.score)),
@@ -287,7 +318,7 @@ mod tests {
         );
 
         let colliding_key2 = key ^ (2u64 << 40);
-        tt.store(colliding_key2, 2, Bound::Lower, 20, None);
+        tt.store(colliding_key2, 2, Bound::Lower, 20, None, None);
         assert!(tt.probe(key).is_none(), "older generation entry aged out");
         assert!(tt.probe(colliding_key2).is_some());
 
@@ -301,7 +332,7 @@ mod tests {
         let mut tt = TranspositionTable::new(1);
         assert_eq!(tt.hashfull_permille(), 0);
         for slot_idx in 0u64..100 {
-            tt.store(slot_idx, 1, Bound::Exact, 0, None);
+            tt.store(slot_idx, 1, Bound::Exact, 0, None, None);
         }
         assert_eq!(tt.hashfull_permille(), 100);
         tt.new_search();
