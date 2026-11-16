@@ -4,6 +4,7 @@ use crate::search::types::MATE_THRESHOLD;
 const MOVE_VALID_BIT: u16 = 0x8000;
 pub(super) const GENERATION_MASK: u8 = 0x3F;
 const BOUND_MASK: u8 = 0x03;
+pub(super) const EVAL_NONE: i16 = i16::MIN;
 
 /// Score bound classification stored with a transposition table entry.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -32,6 +33,7 @@ pub(super) struct TtEntry {
     pub(super) key: u64,
     pub(super) best_move: u16,
     pub(super) score: i16,
+    pub(super) eval: i16,
     pub(super) depth: u8,
     pub(super) meta: u8,
 }
@@ -43,6 +45,7 @@ impl TtEntry {
         key: 0,
         best_move: 0,
         score: 0,
+        eval: EVAL_NONE,
         depth: 0,
         meta: 0,
     };

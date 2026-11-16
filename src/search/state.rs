@@ -56,6 +56,8 @@ pub(super) struct SearchState {
     pub(super) nodes: u64,
     pub(super) max_nodes: Option<u64>,
     pub(super) aborted: bool,
+    pub(super) nmp_min_ply: usize,
+    pub(super) eval_stack: [Option<i32>; MAX_PLY + 1],
     pub(super) path_keys: Vec<u64>,
     pub(super) pv_table: Vec<[Move; MAX_PLY]>,
     pub(super) pv_len: [usize; MAX_PLY + 1],
@@ -69,6 +71,8 @@ impl SearchState {
             nodes: 0,
             max_nodes: None,
             aborted: false,
+            nmp_min_ply: 0,
+            eval_stack: [None; MAX_PLY + 1],
             path_keys: Vec::with_capacity(256),
             pv_table: vec![[DUMMY_MOVE; MAX_PLY]; MAX_PLY + 1],
             pv_len: [0; MAX_PLY + 1],
@@ -86,6 +90,8 @@ impl SearchState {
         self.nodes = 0;
         self.max_nodes = max_nodes;
         self.aborted = false;
+        self.nmp_min_ply = 0;
+        self.eval_stack.fill(None);
         self.path_keys.clear();
         self.path_keys.extend_from_slice(history);
         if self.path_keys.last().copied() != Some(root_key) {

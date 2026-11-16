@@ -41,7 +41,7 @@ impl ScoredMove {
 }
 
 #[inline]
-const fn mvv_value(pt: PieceType) -> i32 {
+pub(super) const fn mvv_value(pt: PieceType) -> i32 {
     match pt {
         PieceType::Pawn => 100,
         PieceType::Bishop => 230,
