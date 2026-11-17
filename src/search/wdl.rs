@@ -1,5 +1,3 @@
-//! Win-Draw-Loss (WDL) probability model for 5x5 Gardner minichess.
-
 use crate::board::Board;
 use crate::core::PieceType;
 use crate::eval::MAX_PHASE;
@@ -13,8 +11,10 @@ pub const DEFAULT_SHOW_WDL: bool = false;
 pub struct Wdl {
     /// Win probability in permille (`0..=1000`).
     pub win: u16,
+
     /// Draw probability in permille (`0..=1000`).
     pub draw: u16,
+
     /// Loss probability in permille (`0..=1000`).
     pub loss: u16,
 }

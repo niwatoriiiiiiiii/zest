@@ -120,6 +120,7 @@ impl SearchLimits {
 pub struct PvLine {
     /// Score in centipawns from the root side-to-move perspective (or mate score).
     pub score: i32,
+
     /// Principal variation moves starting from the root position.
     pub moves: Vec<Move>,
 }
