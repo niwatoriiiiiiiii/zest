@@ -1,6 +1,7 @@
 use crate::core::Move;
 use crate::search::tt_entry::{
-    Bound, EVAL_NONE, GENERATION_MASK, TtEntry, adjust_mate_score, pack_move, unpack_move,
+    Bound, EVAL_NONE, GENERATION_MASK, TtEntry, TtHit, TtProbe, adjust_mate_score, pack_eval,
+    pack_move, unpack_move,
 };
 
 /// Default transposition table size in megabytes.
@@ -13,24 +14,6 @@ pub const MIN_HASH_MB: usize = 1;
 pub const MAX_HASH_MB: usize = 512;
 
 const BYTES_PER_MIB: usize = 1024 * 1024;
-
-/// Decoded transposition table lookup result.
-#[derive(Clone, Copy, PartialEq, Eq, Debug)]
-pub(super) struct TtHit {
-    pub(super) best_move: Option<Move>,
-    pub(super) score: i32,
-    pub(super) eval: Option<i32>,
-    pub(super) depth: u8,
-    pub(super) bound: Bound,
-}
-
-/// Outcome of probing the TT against a search window `(alpha, beta)`.
-#[derive(Clone, Copy, PartialEq, Eq, Debug)]
-pub(super) struct TtProbe {
-    pub(super) cutoff: Option<(i32, bool)>,
-    pub(super) best_move: Option<Move>,
-    pub(super) static_eval: Option<i32>,
-}
 
 /// Fixed-bucket power-of-two Zobrist transposition table.
 #[derive(Debug)]
@@ -211,44 +194,16 @@ impl TranspositionTable {
             None if same_key => slot.best_move,
             None => 0,
         };
-        #[allow(clippy::cast_possible_truncation)]
-        let packed_eval = static_eval.map_or(EVAL_NONE, |eval| {
-            eval.clamp(i32::from(EVAL_NONE) + 1, i32::from(i16::MAX)) as i16
-        });
-
-        let should_replace = existing_bound == Bound::None
-            || if same_key {
-                depth >= slot.depth || (bound == Bound::Exact && existing_bound != Bound::Exact)
-            } else {
-                slot.generation() != generation || depth >= slot.depth
-            };
-
-        if should_replace {
-            let final_eval = if packed_eval != EVAL_NONE {
-                packed_eval
-            } else if same_key {
-                slot.eval
-            } else {
-                EVAL_NONE
-            };
-            #[allow(clippy::cast_possible_truncation)]
-            let clamped_score = score.clamp(i32::from(i16::MIN), i32::from(i16::MAX)) as i16;
-            *slot = TtEntry {
-                key,
-                best_move: packed_move,
-                score: clamped_score,
-                eval: final_eval,
-                depth,
-                meta: TtEntry::pack_meta(bound, generation),
-            };
-        } else if same_key {
-            if slot.best_move == 0 && packed_move != 0 {
-                slot.best_move = packed_move;
-            }
-            if slot.eval == EVAL_NONE && packed_eval != EVAL_NONE {
-                slot.eval = packed_eval;
-            }
-        }
+        let packed_eval = pack_eval(static_eval);
+        slot.write_or_fill(
+            key,
+            depth,
+            bound,
+            score,
+            packed_move,
+            packed_eval,
+            generation,
+        );
     }
 
     #[inline]
@@ -269,9 +224,11 @@ impl TranspositionTable {
         if b1 == Bound::None {
             return base + 1;
         }
-        let age0 = u16::from(s0.generation() != generation) * 256 + u16::from(u8::MAX - s0.depth);
-        let age1 = u16::from(s1.generation() != generation) * 256 + u16::from(u8::MAX - s1.depth);
-        if age0 >= age1 { base } else { base + 1 }
+        if s0.replacement_age(generation) >= s1.replacement_age(generation) {
+            base
+        } else {
+            base + 1
+        }
     }
 
     #[inline]
