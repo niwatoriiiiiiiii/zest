@@ -20,6 +20,7 @@ pub const fn compute_search_limits(params: &GoParams) -> SearchLimits {
         SearchLimits {
             max_depth: params.depth,
             max_nodes: params.nodes,
+            multi_pv: None,
         }
     }
 }

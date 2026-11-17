@@ -5,16 +5,35 @@ use crate::core::Move;
 use crate::eval::evaluate_with_acc;
 use crate::movegen::{MoveList, generate_legal_moves, in_check};
 use crate::search::engine::Searcher;
+use crate::search::multipv::MultiPvState;
 use crate::search::ordering::{order_moves, pick_next_move};
 use crate::search::state::NodeCtx;
 use crate::search::tt_entry::Bound;
 use crate::search::types::{
-    INF_SCORE, MAX_PLY, SearchLimits, SearchResult, is_mate_score, mated_score_in,
+    DEFAULT_MULTI_PV, INF_SCORE, MAX_MULTI_PV, MAX_PLY, MIN_MULTI_PV, PvLine, SearchLimits,
+    SearchResult, is_mate_score, mated_score_in,
 };
 
 const ASPIRATION_MIN_DEPTH: usize = 4;
 const ASPIRATION_INITIAL_DELTA: i32 = 50;
 const ASPIRATION_MAX_DELTA: i32 = 400;
+
+fn terminal_root_result(board: &Board) -> SearchResult {
+    let terminal_score = if in_check(board) {
+        mated_score_in(0)
+    } else {
+        0
+    };
+    SearchResult {
+        best_move: None,
+        score: terminal_score,
+        depth: 0,
+        nodes: 1,
+        hashfull: 0,
+        pv: Vec::new(),
+        pvs: Vec::new(),
+    }
+}
 
 impl Searcher {
     pub(super) fn search_inner(
@@ -27,19 +46,7 @@ impl Searcher {
     ) -> SearchResult {
         let root_moves = generate_legal_moves(board);
         if root_moves.is_empty() {
-            let terminal_score = if in_check(board) {
-                mated_score_in(0)
-            } else {
-                0
-            };
-            return SearchResult {
-                best_move: None,
-                score: terminal_score,
-                depth: 0,
-                nodes: 1,
-                hashfull: 0,
-                pv: Vec::new(),
-            };
+            return terminal_root_result(board);
         }
 
         self.state.reset(board, history, limits.max_nodes);
@@ -51,6 +58,14 @@ impl Searcher {
         let mut completed_depth = 0u8;
         let mut best_pv = vec![fallback_move];
         let mut pv_hint = None;
+
+        let target_pvs = limits
+            .multi_pv
+            .unwrap_or(DEFAULT_MULTI_PV)
+            .clamp(MIN_MULTI_PV, MAX_MULTI_PV)
+            .min(root_moves.len());
+        let mut best_pvs: Vec<PvLine> = Vec::new();
+        let mut multi_state = (target_pvs > 1).then(|| MultiPvState::new(target_pvs, best_score));
 
         let max_depth = usize::from(limits.max_depth.unwrap_or(64)).clamp(1, MAX_PLY);
         let root_reversible_start = self
@@ -73,29 +88,52 @@ impl Searcher {
 
             #[allow(clippy::cast_possible_truncation)]
             let depth_u8 = depth as u8;
-            let score = self.search_aspiration(
-                board,
-                &root_moves,
-                depth,
-                depth_u8,
-                best_score,
-                &mut pv_hint,
-                root_ctx,
-            );
-            if self.state.aborted {
-                break;
+            if target_pvs == 1 {
+                let score = self.search_aspiration(
+                    board,
+                    &root_moves,
+                    depth,
+                    depth_u8,
+                    best_score,
+                    &mut pv_hint,
+                    root_ctx,
+                );
+                if self.state.aborted {
+                    break;
+                }
+                let root_len = self.state.pv_len[0];
+                if root_len > 0 {
+                    let candidate = self.state.pv_table[0][0];
+                    best_move = candidate;
+                    best_score = score;
+                    completed_depth = depth_u8;
+                    best_pv = self.state.pv_table[0][..root_len].to_vec();
+                    self.extend_pv_from_tt(board, &mut best_pv, depth);
+                    pv_hint = Some(candidate);
+                }
+            } else if let Some(ref mut ms) = multi_state {
+                let Some(iter_pvs) =
+                    self.search_multipv_iter(board, &root_moves, depth, depth_u8, ms, root_ctx)
+                else {
+                    break;
+                };
+                if let Some(top) = iter_pvs.first()
+                    && let Some(&mv) = top.moves.first()
+                {
+                    best_move = mv;
+                    best_score = top.score;
+                    completed_depth = depth_u8;
+                    best_pv.clone_from(&top.moves);
+                    best_pvs = iter_pvs;
+                }
             }
+        }
 
-            let root_len = self.state.pv_len[0];
-            if root_len > 0 {
-                let candidate = self.state.pv_table[0][0];
-                best_move = candidate;
-                best_score = score;
-                completed_depth = depth_u8;
-                best_pv = self.state.pv_table[0][..root_len].to_vec();
-                self.extend_pv_from_tt(board, &mut best_pv, depth);
-                pv_hint = Some(candidate);
-            }
+        if best_pvs.is_empty() {
+            best_pvs.push(PvLine {
+                score: best_score,
+                moves: best_pv.clone(),
+            });
         }
 
         SearchResult {
@@ -105,11 +143,12 @@ impl Searcher {
             nodes: self.state.nodes,
             hashfull: self.tt.hashfull_permille(),
             pv: best_pv,
+            pvs: best_pvs,
         }
     }
 
     #[allow(clippy::too_many_arguments)]
-    fn search_aspiration(
+    pub(super) fn search_aspiration(
         &mut self,
         board: &Board,
         root_moves: &MoveList,
@@ -158,7 +197,7 @@ impl Searcher {
         }
     }
 
-    fn extend_pv_from_tt(&self, root: &Board, pv: &mut Vec<Move>, max_len: usize) {
+    pub(super) fn extend_pv_from_tt(&self, root: &Board, pv: &mut Vec<Move>, max_len: usize) {
         if pv.len() >= max_len {
             return;
         }

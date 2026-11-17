@@ -315,3 +315,32 @@ fn handles_hash_setoption_clear_hash_and_ucinewgame() {
     });
     assert_eq!(after_newgame.nodes, first.nodes);
 }
+
+#[test]
+fn multipv_option_outputs_ranked_info_lines() {
+    let mut session = UciSession::new();
+    let uci_lines = session.handle_command_sync(&UciCommand::Uci);
+    assert!(
+        uci_lines
+            .iter()
+            .any(|line| line == "option name MultiPV type spin default 1 min 1 max 32")
+    );
+
+    assert!(
+        session
+            .handle_command_sync(&UciCommand::SetOption {
+                name: "MultiPV".to_string(),
+                value: Some("3".to_string()),
+            })
+            .is_empty()
+    );
+
+    let lines = session.handle_command_sync(&UciCommand::Go(GoParams {
+        depth: Some(3),
+        ..GoParams::default()
+    }));
+    assert!(lines.iter().any(|l| l.contains(" multipv 1 ")));
+    assert!(lines.iter().any(|l| l.contains(" multipv 2 ")));
+    assert!(lines.iter().any(|l| l.contains(" multipv 3 ")));
+    assert!(lines.last().is_some_and(|l| l.starts_with("bestmove ")));
+}
