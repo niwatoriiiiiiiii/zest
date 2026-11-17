@@ -2,6 +2,7 @@ use core::sync::atomic::{AtomicBool, Ordering};
 
 use crate::board::Board;
 use crate::core::{Color, Move, PieceType, Square};
+use crate::eval::AccStack;
 use crate::search::types::MAX_PLY;
 
 const DUMMY_MOVE: Move = Move::new(Square::A1, Square::A1, None);
@@ -58,6 +59,7 @@ pub(super) struct SearchState {
     pub(super) aborted: bool,
     pub(super) nmp_min_ply: usize,
     pub(super) eval_stack: [Option<i32>; MAX_PLY + 1],
+    pub(super) nnue_acc: AccStack,
     pub(super) path_keys: Vec<u64>,
     pub(super) pv_table: Vec<[Move; MAX_PLY]>,
     pub(super) pv_len: [usize; MAX_PLY + 1],
@@ -73,6 +75,7 @@ impl SearchState {
             aborted: false,
             nmp_min_ply: 0,
             eval_stack: [None; MAX_PLY + 1],
+            nnue_acc: AccStack::new(),
             path_keys: Vec::with_capacity(256),
             pv_table: vec![[DUMMY_MOVE; MAX_PLY]; MAX_PLY + 1],
             pv_len: [0; MAX_PLY + 1],
@@ -86,12 +89,14 @@ impl SearchState {
         self.history.fill([[0; NUM_SQUARES]; NUM_SQUARES]);
     }
 
-    pub(super) fn reset(&mut self, root_key: u64, history: &[u64], max_nodes: Option<u64>) {
+    pub(super) fn reset(&mut self, root_board: &Board, history: &[u64], max_nodes: Option<u64>) {
+        let root_key = root_board.key();
         self.nodes = 0;
         self.max_nodes = max_nodes;
         self.aborted = false;
         self.nmp_min_ply = 0;
         self.eval_stack.fill(None);
+        self.nnue_acc.reset(root_board);
         self.path_keys.clear();
         self.path_keys.extend_from_slice(history);
         if self.path_keys.last().copied() != Some(root_key) {

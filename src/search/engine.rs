@@ -2,7 +2,7 @@ use core::sync::atomic::AtomicBool;
 
 use crate::board::Board;
 use crate::core::{Color, Move, PieceType};
-use crate::eval::evaluate;
+use crate::eval::evaluate_with_acc;
 use crate::movegen::{MoveList, generate_legal_moves, gives_check, in_check, is_legal_move};
 use crate::search::ordering::{order_moves, pick_next_move};
 use crate::search::pruning::{MovePruneCtx, PreparedNode, lmr_reduction};
@@ -129,7 +129,7 @@ impl Searcher {
 
         self.state.nodes += 1;
         if ctx.ply >= MAX_PLY {
-            return evaluate(board);
+            return evaluate_with_acc(board, &mut self.state.nnue_acc, ctx.ply);
         }
 
         let key = board.key();
@@ -158,7 +158,7 @@ impl Searcher {
                     && !is_mate_score(beta)
                     && board.has_non_pawn_material(board.side_to_move())));
         if need_eval && static_eval.is_none() {
-            static_eval = Some(evaluate(board));
+            static_eval = Some(evaluate_with_acc(board, &mut self.state.nnue_acc, ctx.ply));
         }
         self.state.eval_stack[ctx.ply] = static_eval;
         let improving = !checked
@@ -226,6 +226,7 @@ impl Searcher {
 
         let mut null_board = *board;
         null_board.make_null_move();
+        self.state.nnue_acc.push_null(ctx.ply + 1);
         let null_ctx = ctx.advance_null(self.state.path_keys.len());
         self.state.path_keys.push(null_board.key());
         let mut null_score = -self.negamax(&null_board, null_depth, -beta, -beta + 1, null_ctx);
@@ -327,6 +328,7 @@ impl Searcher {
             } else {
                 0
             };
+            self.state.nnue_acc.push_move(ctx.ply + 1, board, mv);
             let mut next_board = *board;
             let child_ctx = ctx.advance(&mut next_board, mv, self.state.path_keys.len());
             let score = self.search_window(
@@ -398,6 +400,7 @@ impl Searcher {
             node.quiet_count = 1;
             node.searched_quiets.push(tt_mv);
         }
+        self.state.nnue_acc.push_move(ctx.ply + 1, board, tt_mv);
         let mut next_board = *board;
         let child_ctx = ctx.advance(&mut next_board, tt_mv, self.state.path_keys.len());
         let score = self.search_window(
