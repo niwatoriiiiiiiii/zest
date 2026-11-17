@@ -1,9 +1,26 @@
 use crate::board::Board;
 use crate::core::Move;
-use crate::movegen::MoveList;
+use crate::movegen::{MoveList, generate_legal_moves, in_check};
 use crate::search::engine::Searcher;
 use crate::search::state::NodeCtx;
-use crate::search::types::PvLine;
+use crate::search::types::{PvLine, SearchResult, mated_score_in};
+
+pub(super) fn terminal_root_result(board: &Board) -> SearchResult {
+    let terminal_score = if in_check(board) {
+        mated_score_in(0)
+    } else {
+        0
+    };
+    SearchResult {
+        best_move: None,
+        score: terminal_score,
+        depth: 0,
+        nodes: 1,
+        hashfull: 0,
+        pv: Vec::new(),
+        pvs: Vec::new(),
+    }
+}
 
 pub(super) struct MultiPvState {
     pub(super) scores: Vec<i32>,
@@ -71,5 +88,33 @@ impl Searcher {
             state.hints[idx] = line.moves.first().copied();
         }
         Some(lines)
+    }
+
+    pub(super) fn extend_pv_from_tt(&self, root: &Board, pv: &mut Vec<Move>, max_len: usize) {
+        if pv.len() >= max_len {
+            return;
+        }
+        let mut cur = *root;
+        let mut seen = Vec::with_capacity(max_len + 1);
+        seen.push(cur.key());
+        for &mv in pv.iter() {
+            cur.make_move(mv);
+            seen.push(cur.key());
+        }
+        while pv.len() < max_len && !cur.is_insufficient_material() {
+            let Some(mv) = self.tt.probe(cur.key()).and_then(|hit| hit.best_move) else {
+                break;
+            };
+            if !generate_legal_moves(&cur).as_slice().contains(&mv) {
+                break;
+            }
+            cur.make_move(mv);
+            let next_key = cur.key();
+            if seen.contains(&next_key) {
+                break;
+            }
+            seen.push(next_key);
+            pv.push(mv);
+        }
     }
 }

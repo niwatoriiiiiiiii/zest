@@ -3,37 +3,20 @@ use core::sync::atomic::AtomicBool;
 use crate::board::Board;
 use crate::core::Move;
 use crate::eval::evaluate_with_acc;
-use crate::movegen::{MoveList, generate_legal_moves, in_check};
+use crate::movegen::{MoveList, generate_legal_moves};
 use crate::search::engine::Searcher;
-use crate::search::multipv::MultiPvState;
+use crate::search::multipv::{MultiPvState, terminal_root_result};
 use crate::search::ordering::{order_moves, pick_next_move};
 use crate::search::state::NodeCtx;
 use crate::search::tt_entry::Bound;
 use crate::search::types::{
     DEFAULT_MULTI_PV, INF_SCORE, MAX_MULTI_PV, MAX_PLY, MIN_MULTI_PV, PvLine, SearchLimits,
-    SearchResult, is_mate_score, mated_score_in,
+    SearchResult, is_mate_score,
 };
 
 const ASPIRATION_MIN_DEPTH: usize = 4;
 const ASPIRATION_INITIAL_DELTA: i32 = 50;
 const ASPIRATION_MAX_DELTA: i32 = 400;
-
-fn terminal_root_result(board: &Board) -> SearchResult {
-    let terminal_score = if in_check(board) {
-        mated_score_in(0)
-    } else {
-        0
-    };
-    SearchResult {
-        best_move: None,
-        score: terminal_score,
-        depth: 0,
-        nodes: 1,
-        hashfull: 0,
-        pv: Vec::new(),
-        pvs: Vec::new(),
-    }
-}
 
 impl Searcher {
     pub(super) fn search_inner(
@@ -194,34 +177,6 @@ impl Searcher {
             } else {
                 return score;
             }
-        }
-    }
-
-    pub(super) fn extend_pv_from_tt(&self, root: &Board, pv: &mut Vec<Move>, max_len: usize) {
-        if pv.len() >= max_len {
-            return;
-        }
-        let mut cur = *root;
-        let mut seen = Vec::with_capacity(max_len + 1);
-        seen.push(cur.key());
-        for &mv in pv.iter() {
-            cur.make_move(mv);
-            seen.push(cur.key());
-        }
-        while pv.len() < max_len && !cur.is_insufficient_material() {
-            let Some(mv) = self.tt.probe(cur.key()).and_then(|hit| hit.best_move) else {
-                break;
-            };
-            if !generate_legal_moves(&cur).as_slice().contains(&mv) {
-                break;
-            }
-            cur.make_move(mv);
-            let next_key = cur.key();
-            if seen.contains(&next_key) {
-                break;
-            }
-            seen.push(next_key);
-            pv.push(mv);
         }
     }
 
