@@ -13,6 +13,7 @@ use crate::search::types::{
     DEFAULT_MULTI_PV, INF_SCORE, MAX_MULTI_PV, MAX_PLY, MIN_MULTI_PV, PvLine, SearchLimits,
     SearchResult, is_mate_score,
 };
+use crate::search::wdl::board_phase;
 
 const ASPIRATION_MIN_DEPTH: usize = 4;
 const ASPIRATION_INITIAL_DELTA: i32 = 50;
@@ -127,6 +128,7 @@ impl Searcher {
             hashfull: self.tt.hashfull_permille(),
             pv: best_pv,
             pvs: best_pvs,
+            phase: board_phase(board),
         }
     }
 

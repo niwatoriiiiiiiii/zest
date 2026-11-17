@@ -344,3 +344,35 @@ fn multipv_option_outputs_ranked_info_lines() {
     assert!(lines.iter().any(|l| l.contains(" multipv 3 ")));
     assert!(lines.last().is_some_and(|l| l.starts_with("bestmove ")));
 }
+
+#[test]
+fn uci_show_wdl_emits_permille_wdl_in_info_lines() {
+    let mut session = UciSession::new();
+    let uci_lines = session.handle_command_sync(&UciCommand::Uci);
+    assert!(
+        uci_lines
+            .iter()
+            .any(|line| line == "option name UCI_ShowWDL type check default false")
+    );
+
+    let default_lines = session.handle_command_sync(&UciCommand::Go(GoParams {
+        depth: Some(3),
+        ..GoParams::default()
+    }));
+    assert!(!default_lines[0].contains(" wdl "));
+
+    assert!(
+        session
+            .handle_command_sync(&UciCommand::SetOption {
+                name: "UCI_ShowWDL".to_string(),
+                value: Some("true".to_string()),
+            })
+            .is_empty()
+    );
+
+    let wdl_lines = session.handle_command_sync(&UciCommand::Go(GoParams {
+        depth: Some(3),
+        ..GoParams::default()
+    }));
+    assert!(wdl_lines[0].contains(" wdl "));
+}

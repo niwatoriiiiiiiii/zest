@@ -120,6 +120,7 @@ impl SearchLimits {
 pub struct PvLine {
     /// Score in centipawns from the root side-to-move perspective (or mate score).
     pub score: i32,
+
     /// Principal variation moves starting from the root position.
     pub moves: Vec<Move>,
 }
@@ -147,4 +148,7 @@ pub struct SearchResult {
 
     /// Ranked principal variations (length `1` for standard search, up to `multi_pv`).
     pub pvs: Vec<PvLine>,
+
+    /// Material game phase (`0..=MAX_PHASE`) at the root position for WDL scaling.
+    pub phase: i32,
 }
