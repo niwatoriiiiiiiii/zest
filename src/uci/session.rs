@@ -1,10 +1,12 @@
 use core::sync::atomic::AtomicBool;
 
 use crate::game::Game;
-use crate::search::{DEFAULT_MULTI_PV, MAX_MULTI_PV, MIN_MULTI_PV, SearchResult, Searcher};
+use crate::search::{
+    DEFAULT_MULTI_PV, DEFAULT_SHOW_WDL, MAX_MULTI_PV, MIN_MULTI_PV, SearchResult, Searcher,
+};
 use crate::uci::command::{GoParams, PositionSpec, UciCommand};
 use crate::uci::format::{
-    format_bestmove, format_display, format_eval, format_info_lines, format_perft_divide,
+    format_bestmove, format_display, format_eval, format_info_lines_with_wdl, format_perft_divide,
     format_uci_id,
 };
 use crate::uci::time::compute_search_limits;
@@ -15,6 +17,7 @@ pub struct UciSession {
     game: Game,
     searcher: Option<Searcher>,
     multi_pv: usize,
+    show_wdl: bool,
 }
 
 impl Default for UciSession {
@@ -31,6 +34,7 @@ impl UciSession {
             game: Game::new(),
             searcher: Some(Searcher::new()),
             multi_pv: DEFAULT_MULTI_PV,
+            show_wdl: DEFAULT_SHOW_WDL,
         }
     }
 
@@ -52,6 +56,12 @@ impl UciSession {
     #[must_use]
     pub const fn multi_pv(&self) -> usize {
         self.multi_pv
+    }
+
+    /// Returns whether `UCI_ShowWDL` output is enabled.
+    #[must_use]
+    pub const fn show_wdl(&self) -> bool {
+        self.show_wdl
     }
 
     /// Takes ownership of the reusable [`Searcher`] for background execution.
@@ -126,7 +136,7 @@ impl UciSession {
             },
             UciCommand::Go(params) => {
                 let result = self.search_sync(params);
-                let mut lines = format_info_lines(&result, 0);
+                let mut lines = format_info_lines_with_wdl(&result, 0, self.show_wdl);
                 lines.push(format_bestmove(&result));
                 lines
             }
@@ -165,6 +175,15 @@ impl UciSession {
                 return vec![format!("info string invalid MultiPV value: {raw}")];
             };
             self.multi_pv = count.clamp(MIN_MULTI_PV, MAX_MULTI_PV);
+        } else if name.eq_ignore_ascii_case("UCI_ShowWDL") {
+            let Some(raw) = value else {
+                return vec!["info string UCI_ShowWDL option requires true/false".to_string()];
+            };
+            match raw.to_ascii_lowercase().as_str() {
+                "true" => self.show_wdl = true,
+                "false" => self.show_wdl = false,
+                _ => return vec![format!("info string invalid UCI_ShowWDL value: {raw}")],
+            }
         }
         Vec::new()
     }

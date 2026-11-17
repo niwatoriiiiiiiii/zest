@@ -11,7 +11,7 @@ use std::time::{Duration, Instant};
 use zest::search::{SearchResult, Searcher};
 use zest::uci::{
     GoParams, ParseCommandError, UciCommand, UciSession, compute_search_limits,
-    compute_time_budget_ms, format_bestmove, format_info_lines, parse_command,
+    compute_time_budget_ms, format_bestmove, format_info_lines_with_wdl, parse_command,
 };
 
 enum LoopEvent {
@@ -117,7 +117,7 @@ fn run_uci_loop() {
                     let _ = search.handle.join();
                 }
                 session.restore_searcher(*searcher);
-                for line in format_info_lines(&result, elapsed_ms) {
+                for line in format_info_lines_with_wdl(&result, elapsed_ms, session.show_wdl()) {
                     let _ = writeln!(out, "{line}");
                 }
                 let _ = writeln!(out, "{}", format_bestmove(&result));

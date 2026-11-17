@@ -4,6 +4,7 @@ use crate::movegen::{MoveList, generate_legal_moves, in_check};
 use crate::search::engine::Searcher;
 use crate::search::state::NodeCtx;
 use crate::search::types::{PvLine, SearchResult, mated_score_in};
+use crate::search::wdl::board_phase;
 
 pub(super) fn terminal_root_result(board: &Board) -> SearchResult {
     let terminal_score = if in_check(board) {
@@ -19,6 +20,7 @@ pub(super) fn terminal_root_result(board: &Board) -> SearchResult {
         hashfull: 0,
         pv: Vec::new(),
         pvs: Vec::new(),
+        phase: board_phase(board),
     }
 }
 

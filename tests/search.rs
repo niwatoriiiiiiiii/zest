@@ -6,7 +6,7 @@ use zest::board::Board;
 use zest::core::Move;
 use zest::movegen::{generate_legal_moves, in_check};
 use zest::search::{
-    MATE_SCORE, SearchLimits, Searcher, is_mate_score, mate_distance_in_moves, search,
+    MATE_SCORE, SearchLimits, Searcher, Wdl, is_mate_score, mate_distance_in_moves, search,
 };
 
 fn board_from_fen(fen: &str) -> Board {
@@ -301,4 +301,38 @@ fn multi_pv_returns_distinct_ranked_lines() {
     assert_ne!(first_moves[0], first_moves[1]);
     assert_ne!(first_moves[0], first_moves[2]);
     assert_ne!(first_moves[1], first_moves[2]);
+}
+
+#[test]
+fn wdl_model_is_symmetric_normalized_and_monotonic() {
+    let even = Wdl::from_score(0, 16);
+    assert_eq!(even.win + even.draw + even.loss, 1000);
+    assert_eq!(even.win, even.loss);
+    assert!((even.expected_score() - 0.5).abs() < 1e-9);
+
+    let pos = Wdl::from_score(150, 16);
+    let neg = Wdl::from_score(-150, 16);
+    assert_eq!(pos.win + pos.draw + pos.loss, 1000);
+    assert_eq!(pos.win, neg.loss);
+    assert_eq!(pos.loss, neg.win);
+    assert!(pos.win > even.win);
+
+    let mate = Wdl::from_score(MATE_SCORE - 2, 8);
+    assert_eq!(
+        mate,
+        Wdl {
+            win: 1000,
+            draw: 0,
+            loss: 0
+        }
+    );
+    let mated = Wdl::from_score(-(MATE_SCORE - 2), 8);
+    assert_eq!(
+        mated,
+        Wdl {
+            win: 0,
+            draw: 0,
+            loss: 1000
+        }
+    );
 }
