@@ -315,3 +315,22 @@ fn test_board_display_with_checkers() {
 
     assert_eq!(display_str, expected);
 }
+
+#[test]
+fn test_board_null_move_and_non_pawn_material() {
+    let mut board = Board::from_fen("4k/p4/5/P4/4K w - - 0 1").expect("valid pawn endgame");
+    assert!(!board.has_non_pawn_material(Color::White));
+    assert!(!board.has_non_pawn_material(Color::Black));
+
+    let orig_key = board.key();
+    board.make_null_move();
+    assert_eq!(board.side_to_move(), Color::Black);
+    assert_ne!(board.key(), orig_key);
+    board.make_null_move();
+    assert_eq!(board.side_to_move(), Color::White);
+    assert_eq!(board.key(), orig_key);
+
+    let full = Board::gardner_initial();
+    assert!(full.has_non_pawn_material(Color::White));
+    assert!(full.has_non_pawn_material(Color::Black));
+}

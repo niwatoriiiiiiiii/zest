@@ -256,15 +256,24 @@ fn evaluate_side(board: &Board, color: Color, own_files: u32, enemy_files: u32) 
     (score, phase)
 }
 
-/// Evaluates the given `board` and returns a full [`EvalBreakdown`].
-#[must_use]
 #[inline]
-pub fn evaluate_breakdown(board: &Board) -> EvalBreakdown {
+fn nnue_scale(board: &Board) -> i32 {
+    (board.occupied().as_raw() & !board.piece_type_bb(PieceType::King).as_raw())
+        .count_ones()
+        .saturating_sub(1)
+        .min(4)
+        .cast_signed()
+}
+
+#[inline]
+fn evaluate_breakdown_core(board: &Board, scale: i32, (nn_w, nn_b): (i32, i32)) -> EvalBreakdown {
     let white_files = pawn_files_mask(board.pieces_bb(Color::White, PieceType::Pawn).as_raw());
     let black_files = pawn_files_mask(board.pieces_bb(Color::Black, PieceType::Pawn).as_raw());
 
     let (white, white_phase) = evaluate_side(board, Color::White, white_files, black_files);
     let (black, black_phase) = evaluate_side(board, Color::Black, black_files, white_files);
+    let white = white + Score::new((nn_w * scale) / 4, (nn_w * scale) / 4);
+    let black = black + Score::new((nn_b * scale) / 4, (nn_b * scale) / 4);
     let phase = (white_phase + black_phase).min(MAX_PHASE);
 
     let net = white - black;
@@ -281,6 +290,34 @@ pub fn evaluate_breakdown(board: &Board) -> EvalBreakdown {
         tempo: TEMPO_BONUS,
         total: positional + TEMPO_BONUS,
     }
+}
+
+/// Evaluates the given `board` and returns a full [`EvalBreakdown`].
+#[must_use]
+#[inline]
+pub fn evaluate_breakdown(board: &Board) -> EvalBreakdown {
+    let scale = nnue_scale(board);
+    let nn_res = if scale == 0 {
+        (0, 0)
+    } else {
+        crate::eval::nnue::evaluate_nnue_residual(board)
+    };
+    evaluate_breakdown_core(board, scale, nn_res)
+}
+
+/// Evaluates `board` in centipawns from the side-to-move perspective using an incremental [`AccStack`](crate::eval::AccStack).
+#[must_use]
+#[inline]
+pub fn evaluate_with_acc(board: &Board, acc: &mut crate::eval::nnue::AccStack, ply: usize) -> i32 {
+    let scale = nnue_scale(board);
+    let nn_res = if scale == 0 {
+        (0, 0)
+    } else {
+        let res = acc.evaluate_residual(board, ply);
+        debug_assert_eq!(res, crate::eval::nnue::evaluate_nnue_residual(board));
+        res
+    };
+    evaluate_breakdown_core(board, scale, nn_res).total
 }
 
 /// Returns the static evaluation of `board` in centipawns from the side-to-move perspective.

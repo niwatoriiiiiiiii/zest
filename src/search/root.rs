@@ -2,7 +2,7 @@ use core::sync::atomic::AtomicBool;
 
 use crate::board::Board;
 use crate::core::Move;
-use crate::eval::evaluate;
+use crate::eval::evaluate_with_acc;
 use crate::movegen::{MoveList, generate_legal_moves, in_check};
 use crate::search::engine::Searcher;
 use crate::search::ordering::{order_moves, pick_next_move};
@@ -42,21 +42,27 @@ impl Searcher {
             };
         }
 
-        self.state.reset(board.key(), history, limits.max_nodes);
+        self.state.reset(board, history, limits.max_nodes);
         self.tt.new_search();
 
         let fallback_move = root_moves[0];
         let mut best_move = fallback_move;
-        let mut best_score = evaluate(board);
+        let mut best_score = evaluate_with_acc(board, &mut self.state.nnue_acc, 0);
         let mut completed_depth = 0u8;
         let mut best_pv = vec![fallback_move];
         let mut pv_hint = None;
 
         let max_depth = usize::from(limits.max_depth.unwrap_or(64)).clamp(1, MAX_PLY);
+        let root_reversible_start = self
+            .state
+            .path_keys
+            .len()
+            .saturating_sub(1 + usize::from(halfmove_clock));
         let root_ctx = NodeCtx {
             ply: 0,
             halfmove: halfmove_clock,
-            reversible_start: 0,
+            reversible_start: root_reversible_start,
+            allow_null: true,
             stop,
         };
 
@@ -207,7 +213,8 @@ impl Searcher {
         let (mut scored, len) = order_moves(board, moves, priority_move, &self.state, 0);
 
         for idx in 0..len {
-            let mv = pick_next_move(board, &mut scored, idx, len);
+            let mv = pick_next_move(board, &mut scored, idx, len).mv();
+            self.state.nnue_acc.push_move(ctx.ply + 1, board, mv);
             let mut next_board = *board;
             let child_ctx = ctx.advance(&mut next_board, mv, self.state.path_keys.len());
             let score = self.search_window(
@@ -227,8 +234,15 @@ impl Searcher {
                 if score > alpha {
                     if score >= beta {
                         self.state.update_pv(0, mv);
-                        self.tt
-                            .store_at(key, depth, Bound::Lower, best_score, 0, best_move);
+                        self.tt.store_at(
+                            key,
+                            depth,
+                            Bound::Lower,
+                            best_score,
+                            0,
+                            best_move,
+                            tt_hit.and_then(|hit| hit.eval),
+                        );
                         return best_score;
                     }
                     alpha = score;
@@ -237,6 +251,14 @@ impl Searcher {
             }
         }
 
-        self.store_node_result(key, depth, best_score, orig_alpha, best_move, 0)
+        self.store_node_result(
+            key,
+            depth,
+            best_score,
+            orig_alpha,
+            best_move,
+            tt_hit.and_then(|hit| hit.eval),
+            0,
+        )
     }
 }

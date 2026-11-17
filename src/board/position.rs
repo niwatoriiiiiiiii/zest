@@ -133,6 +133,22 @@ impl Board {
         self.key ^= ZobristKeys::side_to_move_key();
     }
 
+    /// Passes the turn without moving a piece, toggling the side to move and Zobrist key.
+    pub fn make_null_move(&mut self) {
+        self.side_to_move = !self.side_to_move;
+        self.key ^= ZobristKeys::side_to_move_key();
+    }
+
+    /// Returns `true` if `color` has at least one knight, bishop, rook, or queen.
+    #[must_use]
+    pub const fn has_non_pawn_material(self, color: Color) -> bool {
+        let non_pawns = self.piece_type_bb(PieceType::Knight).as_raw()
+            | self.piece_type_bb(PieceType::Bishop).as_raw()
+            | self.piece_type_bb(PieceType::Rook).as_raw()
+            | self.piece_type_bb(PieceType::Queen).as_raw();
+        (self.color_bb(color).as_raw() & non_pawns) != 0
+    }
+
     /// Returns a bitboard of all occupied squares on the board.
     #[must_use]
     pub const fn occupied(self) -> Bitboard {

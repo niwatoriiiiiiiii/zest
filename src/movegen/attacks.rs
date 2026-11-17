@@ -1,5 +1,5 @@
 use crate::board::{Bitboard, Board};
-use crate::core::{Color, PieceType, Square};
+use crate::core::{Color, Move, PieceType, Square};
 use crate::movegen::magic::{bishop_attacks, rook_attacks};
 
 const KNIGHT_MOVES: [(i8, i8); 8] = [
@@ -46,7 +46,19 @@ pub fn is_square_attacked_with_occupied(
     by_color: Color,
     occupied: Bitboard,
 ) -> bool {
-    let enemies = board.color_bb(by_color);
+    is_square_attacked_filtered(board, sq, by_color, occupied, Bitboard::ALL)
+}
+
+/// Returns `true` if `sq` is attacked by `by_color` among `attacker_mask` under `occupied`.
+#[must_use]
+pub fn is_square_attacked_filtered(
+    board: &Board,
+    sq: Square,
+    by_color: Color,
+    occupied: Bitboard,
+    attacker_mask: Bitboard,
+) -> bool {
+    let enemies = board.color_bb(by_color) & attacker_mask;
     let queens = board.piece_type_bb(PieceType::Queen);
 
     if pawn_attacks(sq, !by_color).intersects(enemies & board.piece_type_bb(PieceType::Pawn)) {
@@ -110,6 +122,52 @@ pub fn in_check(board: &Board) -> bool {
         return false;
     };
     is_square_attacked(board, king_sq, !us)
+}
+
+/// Returns `true` if playing `mv` on `board` puts the opponent's king in check.
+#[must_use]
+pub fn gives_check(board: &Board, mv: Move) -> bool {
+    let us = board.side_to_move();
+    let Some(enemy_king_sq) = board.pieces_bb(!us, PieceType::King).lsb() else {
+        return false;
+    };
+    let from = mv.from();
+    let to = mv.to();
+    let Some(piece) = board.piece_at(from) else {
+        return false;
+    };
+    let moved_pt = mv.promotion().unwrap_or(piece.piece_type);
+    let occ_after = (board.occupied() ^ Bitboard::from_square(from)) | Bitboard::from_square(to);
+
+    let direct = match moved_pt {
+        PieceType::Pawn => pawn_attacks(to, us).contains(enemy_king_sq),
+        PieceType::Knight => knight_attacks(to).contains(enemy_king_sq),
+        PieceType::Bishop => bishop_attacks(to, occ_after).contains(enemy_king_sq),
+        PieceType::Rook => rook_attacks(to, occ_after).contains(enemy_king_sq),
+        PieceType::Queen => {
+            bishop_attacks(to, occ_after).contains(enemy_king_sq)
+                || rook_attacks(to, occ_after).contains(enemy_king_sq)
+        }
+        PieceType::King => false,
+    };
+    if direct {
+        return true;
+    }
+
+    // Discovered check requires `from` to sit on an orthogonal or diagonal ray from the enemy king.
+    let df = from.file().abs_diff(enemy_king_sq.file());
+    let dr = from.rank().abs_diff(enemy_king_sq.rank());
+    if df != 0 && dr != 0 && df != dr {
+        return false;
+    }
+
+    let friendly = board.color_bb(us) ^ Bitboard::from_square(from);
+    let queens = board.piece_type_bb(PieceType::Queen);
+    let diag_sliders = friendly & (board.piece_type_bb(PieceType::Bishop) | queens);
+    let orth_sliders = friendly & (board.piece_type_bb(PieceType::Rook) | queens);
+
+    bishop_attacks(enemy_king_sq, occ_after).intersects(diag_sliders)
+        || rook_attacks(enemy_king_sq, occ_after).intersects(orth_sliders)
 }
 
 /// Returns a bitboard of all squares attacked by a knight on the given `sq`.

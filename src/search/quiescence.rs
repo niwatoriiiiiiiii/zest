@@ -1,11 +1,24 @@
 use crate::board::Board;
-use crate::eval::evaluate;
-use crate::movegen::{generate_legal_moves, in_check};
-use crate::search::ordering::{order_moves, order_tactical_moves, pick_next_move};
+use crate::eval::evaluate_with_acc;
+use crate::movegen::{generate_legal_moves, generate_tactical_moves, gives_check, in_check};
+use crate::search::ordering::{
+    mvv_value, order_moves, order_tactical_moves, pick_next_move, pick_next_scored,
+};
 use crate::search::state::{NodeCtx, SearchState};
 use crate::search::tt::TranspositionTable;
 use crate::search::tt_entry::Bound;
-use crate::search::types::{INF_SCORE, MAX_PLY, mated_score_in};
+use crate::search::types::{INF_SCORE, MAX_PLY, is_mate_score, mated_score_in};
+
+#[inline]
+fn can_delta_prune(board: &Board, mv: crate::core::Move, stand_pat: i32, alpha: i32) -> bool {
+    if mv.promotion().is_some() || is_mate_score(alpha) || gives_check(board, mv) {
+        return false;
+    }
+    let gain = board
+        .piece_at(mv.to())
+        .map_or(0, |p| mvv_value(p.piece_type));
+    stand_pat + gain + 140 < alpha
+}
 
 pub(super) fn quiesce(
     state: &mut SearchState,
@@ -22,7 +35,7 @@ pub(super) fn quiesce(
     state.nodes += 1;
 
     if ctx.ply >= MAX_PLY {
-        return evaluate(board);
+        return evaluate_with_acc(board, &mut state.nnue_acc, ctx.ply);
     }
 
     let key = board.key();
@@ -36,39 +49,53 @@ pub(super) fn quiesce(
     }
 
     let checked = in_check(board);
-    let moves = generate_legal_moves(board);
-    if moves.is_empty() {
-        return if checked { mated_score_in(ctx.ply) } else { 0 };
-    }
-
-    if ctx.halfmove >= 100 {
-        return 0;
-    }
-
     let orig_alpha = alpha;
     let mut best_score = -INF_SCORE;
     let mut best_move = None;
+    let mut static_eval = None;
 
-    if !checked {
-        let stand_pat = evaluate(board);
+    let (mut scored, len) = if checked {
+        let moves = generate_legal_moves(board);
+        if moves.is_empty() {
+            return mated_score_in(ctx.ply);
+        }
+        if ctx.halfmove >= 100 {
+            return 0;
+        }
+        order_moves(board, &moves, tt_probe.best_move, state, ctx.ply)
+    } else {
+        if ctx.halfmove >= 100 {
+            return 0;
+        }
+        let stand_pat = tt_probe
+            .static_eval
+            .unwrap_or_else(|| evaluate_with_acc(board, &mut state.nnue_acc, ctx.ply));
+        static_eval = Some(stand_pat);
         if stand_pat >= beta {
-            tt.store_at(key, 0, Bound::Lower, stand_pat, ctx.ply, None);
+            tt.store_at(key, 0, Bound::Lower, stand_pat, ctx.ply, None, static_eval);
             return stand_pat;
         }
         best_score = stand_pat;
         if stand_pat > alpha {
             alpha = stand_pat;
         }
-    }
-
-    let (mut scored, len) = if checked {
-        order_moves(board, &moves, tt_probe.best_move, state, ctx.ply)
-    } else {
+        let moves = generate_tactical_moves(board);
         order_tactical_moves(board, &moves, tt_probe.best_move)
     };
 
     for idx in 0..len {
-        let mv = pick_next_move(board, &mut scored, idx, len);
+        let item = if checked {
+            pick_next_move(board, &mut scored, idx, len)
+        } else {
+            pick_next_scored(&mut scored, idx, len)
+        };
+        let mv = item.mv();
+        if let Some(stand_pat) = static_eval
+            && can_delta_prune(board, mv, stand_pat, alpha)
+        {
+            continue;
+        }
+        state.nnue_acc.push_move(ctx.ply + 1, board, mv);
         let mut next_board = *board;
         let child_ctx = ctx.advance(&mut next_board, mv, state.path_keys.len());
 
@@ -85,7 +112,15 @@ pub(super) fn quiesce(
             best_move = Some(mv);
             if score > alpha {
                 if score >= beta {
-                    tt.store_at(key, 0, Bound::Lower, best_score, ctx.ply, best_move);
+                    tt.store_at(
+                        key,
+                        0,
+                        Bound::Lower,
+                        best_score,
+                        ctx.ply,
+                        best_move,
+                        static_eval,
+                    );
                     return best_score;
                 }
                 alpha = score;
@@ -98,6 +133,6 @@ pub(super) fn quiesce(
     } else {
         (Bound::Upper, None)
     };
-    tt.store_at(key, 0, bound, best_score, ctx.ply, stored_move);
+    tt.store_at(key, 0, bound, best_score, ctx.ply, stored_move, static_eval);
     best_score
 }

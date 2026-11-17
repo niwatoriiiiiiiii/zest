@@ -1,8 +1,9 @@
 use crate::board::{Bitboard, Board};
 use crate::core::{Color, Move, PieceType, Square};
 use crate::movegen::{
-    CheckInfo, MoveList, between, bishop_attacks, is_square_attacked_with_occupied, king_attacks,
-    knight_attacks, pawn_attacks, queen_attacks, rook_attacks,
+    CheckInfo, MoveList, between, bishop_attacks, is_square_attacked_filtered,
+    is_square_attacked_with_occupied, king_attacks, knight_attacks, pawn_attacks, queen_attacks,
+    rook_attacks,
 };
 
 /// Generates all legal moves for the current player (`side_to_move`).
@@ -15,6 +16,93 @@ use crate::movegen::{
 /// Panics if the current board position does not contain a king for `board.side_to_move()`.
 #[must_use]
 pub fn generate_legal_moves(board: &Board) -> MoveList {
+    generate_moves_filtered(board, false)
+}
+
+/// Generates legal tactical moves (captures and promotions) when not in check,
+/// or all legal check evasions when in check.
+///
+/// # Panics
+///
+/// Panics if the current board position does not contain a king for `board.side_to_move()`.
+#[must_use]
+pub fn generate_tactical_moves(board: &Board) -> MoveList {
+    generate_moves_filtered(board, true)
+}
+
+/// Returns `true` if `mv` is a legal move on `board`.
+#[must_use]
+pub fn is_legal_move(board: &Board, mv: Move) -> bool {
+    let from = mv.from();
+    let to = mv.to();
+    if from == to {
+        return false;
+    }
+    let us = board.side_to_move();
+    let Some(piece) = board.piece_at(from) else {
+        return false;
+    };
+    if piece.color != us || board.color_bb(us).contains(to) {
+        return false;
+    }
+
+    let occupied = board.occupied();
+    let enemies = board.color_bb(!us);
+    let promo = mv.promotion();
+
+    if piece.piece_type == PieceType::Pawn {
+        let (forward_rank, promo_rank) = match us {
+            Color::White => (from.rank().cast_signed() + 1, 4),
+            Color::Black => (from.rank().cast_signed() - 1, 0),
+        };
+        if to.rank() == promo_rank {
+            if !matches!(
+                promo,
+                Some(PieceType::Queen | PieceType::Rook | PieceType::Bishop | PieceType::Knight)
+            ) {
+                return false;
+            }
+        } else if promo.is_some() {
+            return false;
+        }
+
+        let is_push = to.rank().cast_signed() == forward_rank
+            && to.file() == from.file()
+            && !occupied.contains(to);
+        let is_capture = pawn_attacks(from, us).contains(to) && enemies.contains(to);
+        if !is_push && !is_capture {
+            return false;
+        }
+    } else {
+        if promo.is_some() {
+            return false;
+        }
+        let attacks = match piece.piece_type {
+            PieceType::Knight => knight_attacks(from),
+            PieceType::Bishop => bishop_attacks(from, occupied),
+            PieceType::Rook => rook_attacks(from, occupied),
+            PieceType::Queen => queen_attacks(from, occupied),
+            PieceType::King => king_attacks(from),
+            PieceType::Pawn => unreachable!(),
+        };
+        if !attacks.contains(to) {
+            return false;
+        }
+    }
+
+    let occ_after = (occupied ^ Bitboard::from_square(from)) | Bitboard::from_square(to);
+    let king_sq = if piece.piece_type == PieceType::King {
+        to
+    } else {
+        let Some(ksq) = board.pieces_bb(us, PieceType::King).lsb() else {
+            return false;
+        };
+        ksq
+    };
+    !is_square_attacked_filtered(board, king_sq, !us, occ_after, !Bitboard::from_square(to))
+}
+
+fn generate_moves_filtered(board: &Board, tactical_only: bool) -> MoveList {
     let mut moves = MoveList::new();
     let us = board.side_to_move();
 
@@ -24,12 +112,14 @@ pub fn generate_legal_moves(board: &Board) -> MoveList {
         .expect("King must exist");
     let check_info = CheckInfo::compute(board, us, my_king_sq);
     let num_checkers = check_info.checkers.count();
+    let tactical = tactical_only && num_checkers == 0;
 
     let friendly_bb = board.color_bb(us);
-    let not_friendly = !friendly_bb;
+    let enemies_bb = board.color_bb(!us);
+    let target_pool = if tactical { enemies_bb } else { !friendly_bb };
 
     // King moves are verified against check
-    generate_king_moves(&mut moves, board, my_king_sq, us, not_friendly);
+    generate_king_moves(&mut moves, board, my_king_sq, us, target_pool);
 
     // If double check, ONLY king moves can escape
     if num_checkers >= 2 {
@@ -66,7 +156,8 @@ pub fn generate_legal_moves(board: &Board) -> MoveList {
             continue;
         }
 
-        let legal_target_mask = check_mask & allowed_ray & not_friendly;
+        let push_mask = check_mask & allowed_ray;
+        let legal_target_mask = push_mask & target_pool;
 
         match piece.piece_type {
             PieceType::Knight => {
@@ -97,7 +188,7 @@ pub fn generate_legal_moves(board: &Board) -> MoveList {
                 );
             }
             PieceType::Pawn => {
-                generate_pawn_moves(&mut moves, board, sq, us, legal_target_mask);
+                generate_pawn_moves(&mut moves, board, sq, us, push_mask, enemies_bb, tactical);
             }
             PieceType::King => unreachable!(),
         }
@@ -133,21 +224,28 @@ fn generate_pawn_moves(
     board: &Board,
     sq: Square,
     us: Color,
-    legal_target_mask: Bitboard,
+    push_mask: Bitboard,
+    enemies_bb: Bitboard,
+    tactical_only: bool,
 ) {
+    let promo_rank = match us {
+        Color::White => 4,
+        Color::Black => 0,
+    };
     let forward_rank = match us {
         Color::White => sq.rank().cast_signed() + 1,
         Color::Black => sq.rank().cast_signed() - 1,
     };
     if (0..5).contains(&forward_rank)
+        && (!tactical_only || forward_rank.cast_unsigned() == promo_rank)
         && let Some(to) = Square::new(sq.file(), forward_rank.cast_unsigned())
         && !board.occupied().contains(to)
-        && legal_target_mask.contains(to)
+        && push_mask.contains(to)
     {
         push_pawn_move(moves, sq, to, us);
     }
 
-    let mut attacks = pawn_attacks(sq, us) & legal_target_mask & board.occupied();
+    let mut attacks = pawn_attacks(sq, us) & push_mask & enemies_bb;
     while let Some(to) = attacks.pop_lsb() {
         push_pawn_move(moves, sq, to, us);
     }

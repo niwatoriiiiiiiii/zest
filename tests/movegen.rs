@@ -199,3 +199,70 @@ fn test_king_can_capture_unprotected_checker() {
     assert!(moves.contains(&Move::new(Square::C2, Square::D1, None)));
     assert!(!moves.contains(&Move::new(Square::C2, Square::C1, None)));
 }
+
+#[test]
+fn test_generate_tactical_moves_matches_filtered_legal_moves() {
+    let fens = [
+        "rnbqk/ppppp/5/PPPPP/RNBQK w - - 0 1",
+        "4k/1P3/2p2/1N1B1/4K w - - 0 1",
+        "2k2/2P2/2R2/3n1/4K w - - 0 1",
+    ];
+    for fen in fens {
+        let board = Board::from_fen(fen).expect("valid FEN");
+        let all = generate_legal_moves(&board);
+        let tactical = zest::movegen::generate_tactical_moves(&board);
+        let expected: Vec<Move> = all
+            .iter()
+            .copied()
+            .filter(|mv| board.piece_at(mv.to()).is_some() || mv.promotion().is_some())
+            .collect();
+        assert_eq!(tactical.len(), expected.len(), "len mismatch on {fen}");
+        for mv in expected {
+            assert!(
+                tactical.contains(&mv),
+                "missing tactical move {mv} on {fen}"
+            );
+        }
+    }
+}
+
+#[test]
+fn test_is_legal_move_matches_generate_legal_moves_exhaustively() {
+    use zest::core::Square;
+    use zest::movegen::is_legal_move;
+
+    let fens = [
+        "rnbqk/ppppp/5/PPPPP/RNBQK w - - 0 1",
+        "4k/1P3/2p2/1N1B1/4K w - - 0 1",
+        "2k2/2P2/2R2/3n1/4K w - - 0 1",
+        "4k/5/2q2/3P1/4K w - - 0 1",
+        "k3r/pp3/2b2/4R/2K1Q w - - 0 1",
+        "4k/5/3QK/5/5 b - - 0 1",
+    ];
+    let promos = [
+        None,
+        Some(PieceType::Queen),
+        Some(PieceType::Rook),
+        Some(PieceType::Bishop),
+        Some(PieceType::Knight),
+        Some(PieceType::Pawn),
+        Some(PieceType::King),
+    ];
+
+    for fen in fens {
+        let board = Board::from_fen(fen).expect("valid FEN");
+        let legal = generate_legal_moves(&board);
+        for &from in &Square::ALL {
+            for &to in &Square::ALL {
+                for promo in promos {
+                    let mv = Move::new(from, to, promo);
+                    assert_eq!(
+                        is_legal_move(&board, mv),
+                        legal.contains(&mv),
+                        "is_legal_move mismatch for {mv} on {fen}"
+                    );
+                }
+            }
+        }
+    }
+}

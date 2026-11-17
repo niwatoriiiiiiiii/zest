@@ -425,3 +425,34 @@ fn test_checkers_and_in_check() {
     assert_eq!(checkers(&black_turn), Bitboard::EMPTY);
     assert!(!in_check(&black_turn));
 }
+
+#[test]
+fn test_gives_check_matches_make_move_in_check() {
+    fn verify_all_children(board: &Board, depth: u8) {
+        for &mv in zest::movegen::generate_legal_moves(board).iter() {
+            let mut next = *board;
+            next.make_move(mv);
+            assert_eq!(
+                zest::movegen::gives_check(board, mv),
+                in_check(&next),
+                "gives_check mismatch for {mv} on {}",
+                board.to_fen()
+            );
+            if depth > 1 {
+                verify_all_children(&next, depth - 1);
+            }
+        }
+    }
+
+    let fens = [
+        "rnbqk/ppppp/5/PPPPP/RNBQK w - - 0 1",
+        "4k/1P3/2R2/2B2/4K w - - 0 1",
+        "k3r/pp3/2b2/4R/2K1Q w - - 0 1",
+        "2k2/2P2/2R2/5/4K w - - 0 1",
+    ];
+    verify_all_children(&Board::gardner_initial(), 3);
+    for fen in &fens[1..] {
+        let board = Board::from_fen(fen).expect("valid FEN");
+        verify_all_children(&board, 2);
+    }
+}

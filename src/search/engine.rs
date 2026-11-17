@@ -1,16 +1,15 @@
 use core::sync::atomic::AtomicBool;
 
 use crate::board::Board;
-use crate::core::Move;
-use crate::eval::evaluate;
-use crate::movegen::{MoveList, generate_legal_moves, in_check};
-use crate::search::ordering::{order_moves, pick_next_move};
-use crate::search::pruning::{MovePruneCtx, PreparedNode, lmr_reduction};
+use crate::core::{Color, Move, PieceType};
+use crate::eval::evaluate_with_acc;
+use crate::movegen::in_check;
+use crate::search::pruning::MovePruneCtx;
 use crate::search::quiescence::quiesce;
-use crate::search::state::{NodeCtx, SearchState, is_quiet_move};
+use crate::search::state::{NodeCtx, SearchState};
 use crate::search::tt::{DEFAULT_HASH_MB, TranspositionTable};
 use crate::search::tt_entry::Bound;
-use crate::search::types::{INF_SCORE, MAX_PLY, SearchLimits, SearchResult, mated_score_in};
+use crate::search::types::{MAX_PLY, SearchLimits, SearchResult, is_mate_score};
 
 /// Stateful game-tree search engine using iterative deepening, PVS, and pruning heuristics.
 #[derive(Debug)]
@@ -83,7 +82,7 @@ impl Searcher {
         self.search_inner(board, history, halfmove_clock, limits, Some(stop))
     }
 
-    fn negamax(
+    pub(super) fn negamax(
         &mut self,
         board: &Board,
         depth: u8,
@@ -102,7 +101,7 @@ impl Searcher {
 
         self.state.nodes += 1;
         if ctx.ply >= MAX_PLY {
-            return evaluate(board);
+            return evaluate_with_acc(board, &mut self.state.nnue_acc, ctx.ply);
         }
 
         let key = board.key();
@@ -119,118 +118,121 @@ impl Searcher {
         }
 
         let checked = in_check(board);
-        let moves = generate_legal_moves(board);
-        if moves.is_empty() {
-            return if checked { mated_score_in(ctx.ply) } else { 0 };
-        }
-        if ctx.halfmove >= 100 {
+        if !checked && ctx.halfmove >= 100 {
             return 0;
         }
 
+        let mut static_eval = (!checked).then_some(tt_probe.static_eval).flatten();
+        let need_eval = !checked
+            && !is_pv
+            && (depth <= 7
+                || (ctx.allow_null
+                    && !is_mate_score(beta)
+                    && board.has_non_pawn_material(board.side_to_move())));
+        if need_eval && static_eval.is_none() {
+            static_eval = Some(evaluate_with_acc(board, &mut self.state.nnue_acc, ctx.ply));
+        }
+        self.state.eval_stack[ctx.ply] = static_eval;
+        let improving = !checked
+            && static_eval.is_some_and(|cur| {
+                (ctx.ply >= 2 && self.state.eval_stack[ctx.ply - 2].is_some_and(|prev| cur > prev))
+                    || (ctx.ply >= 4
+                        && self.state.eval_stack[ctx.ply - 2].is_none()
+                        && self.state.eval_stack[ctx.ply - 4].is_some_and(|prev| cur > prev))
+            });
+        let imminent_promo =
+            (board.pieces_bb(Color::White, PieceType::Pawn).as_raw() & 0x000F_8000) != 0
+                || (board.pieces_bb(Color::Black, PieceType::Pawn).as_raw() & 0x0000_03E0) != 0;
         let prep = MovePruneCtx::prepare(
-            board,
             depth,
             (alpha, beta),
-            is_pv,
-            checked,
+            (checked, is_pv, !imminent_promo, improving),
+            static_eval,
             tt_probe.best_move.is_some(),
             ctx.ply,
         );
         if let Some(score) = prep.rfp_cutoff {
             return score;
         }
-
-        self.search_children(board, &moves, &prep, tt_probe.best_move, (alpha, beta), ctx)
-    }
-
-    fn search_children(
-        &mut self,
-        board: &Board,
-        moves: &MoveList,
-        prep: &PreparedNode,
-        tt_move: Option<Move>,
-        (mut alpha, beta): (i32, i32),
-        ctx: NodeCtx<'_>,
-    ) -> i32 {
-        let key = board.key();
-        let orig_alpha = alpha;
-        let mut best_score = -INF_SCORE;
-        let mut best_move = None;
-        let mut quiet_count = 0usize;
-        let mut searched_quiets = MoveList::new();
-        let (mut scored, len) = order_moves(board, moves, tt_move, &self.state, ctx.ply);
-
-        for idx in 0..len {
-            let mv = pick_next_move(board, &mut scored, idx, len);
-            let quiet = is_quiet_move(board, mv);
-            if quiet {
-                quiet_count += 1;
-            }
-
-            let (prunable, lmr_candidate) =
-                prep.prune_ctx
-                    .classify(board, mv, idx, quiet, quiet_count, scored[idx].score());
-            let mut next_board = *board;
-            let child_ctx = ctx.advance(&mut next_board, mv, self.state.path_keys.len());
-            let gives_check = (prunable || lmr_candidate) && in_check(&next_board);
-            if prunable && !gives_check {
-                continue;
-            }
-
-            let prior_quiets = searched_quiets.len();
-            if quiet {
-                searched_quiets.push(mv);
-            }
-
-            let red = if lmr_candidate && !gives_check {
-                lmr_reduction(
-                    prep.depth,
-                    prep.child_depth,
-                    idx,
-                    prep.prune_ctx.is_pv,
-                    scored[idx].score(),
-                )
-            } else {
-                0
-            };
-            let score = self.search_window(
-                &next_board,
-                prep.child_depth,
-                red,
-                idx == 0,
-                (alpha, beta),
-                child_ctx,
-            );
-            if self.state.aborted {
-                return 0;
-            }
-
-            if score > best_score {
-                best_score = score;
-                best_move = Some(mv);
-                if score > alpha {
-                    if score >= beta {
-                        self.record_beta_cutoff(
-                            board,
-                            key,
-                            prep.depth,
-                            best_score,
-                            &searched_quiets.as_slice()[..prior_quiets],
-                            mv,
-                            ctx.ply,
-                        );
-                        return best_score;
-                    }
-                    alpha = score;
-                    self.state.update_pv(ctx.ply, mv);
-                }
-            }
+        if let Some(score) =
+            self.try_null_move(board, prep.depth, beta, is_pv, prep.static_eval, ctx)
+        {
+            return score;
         }
 
-        self.store_node_result(key, prep.depth, best_score, orig_alpha, best_move, ctx.ply)
+        self.search_children(
+            board,
+            &prep,
+            tt_probe.best_move,
+            (alpha, beta),
+            checked,
+            ctx,
+        )
     }
 
     #[inline]
+    fn try_null_move(
+        &mut self,
+        board: &Board,
+        depth: u8,
+        beta: i32,
+        is_pv: bool,
+        static_eval: Option<i32>,
+        ctx: NodeCtx<'_>,
+    ) -> Option<i32> {
+        let eval = static_eval?;
+        if is_pv
+            || !ctx.allow_null
+            || ctx.ply < self.state.nmp_min_ply
+            || depth < 4
+            || eval < beta + 20
+            || is_mate_score(beta)
+            || !board.has_non_pawn_material(board.side_to_move())
+        {
+            return None;
+        }
+
+        let eval_bonus = u8::from(eval - beta >= 180);
+        let r = 2 + depth / 5 + eval_bonus;
+        let null_depth = depth.saturating_sub(1 + r).max(1);
+
+        let mut null_board = *board;
+        null_board.make_null_move();
+        self.state.nnue_acc.push_null(ctx.ply + 1);
+        let null_ctx = ctx.advance_null(self.state.path_keys.len());
+        self.state.path_keys.push(null_board.key());
+        let mut null_score = -self.negamax(&null_board, null_depth, -beta, -beta + 1, null_ctx);
+        self.state.path_keys.pop();
+
+        if self.state.aborted || null_score < beta {
+            return None;
+        }
+        if is_mate_score(null_score) {
+            null_score = beta;
+        }
+        if depth >= 12 {
+            let prev_nmp_min = self.state.nmp_min_ply;
+            self.state.nmp_min_ply = ctx.ply + (3 * usize::from(null_depth)) / 4;
+            let verify_ctx = NodeCtx {
+                allow_null: false,
+                ..ctx
+            };
+            let verified = self.negamax(board, null_depth, beta - 1, beta, verify_ctx);
+            self.state.nmp_min_ply = prev_nmp_min;
+            if self.state.aborted || verified < beta {
+                return None;
+            }
+            return Some(if is_mate_score(verified) {
+                beta
+            } else {
+                verified
+            });
+        }
+        Some(null_score)
+    }
+
+    #[inline]
+    #[allow(clippy::too_many_arguments)]
     pub(super) fn store_node_result(
         &mut self,
         key: u64,
@@ -238,6 +240,7 @@ impl Searcher {
         best_score: i32,
         orig_alpha: i32,
         best_move: Option<Move>,
+        static_eval: Option<i32>,
         ply: usize,
     ) -> i32 {
         let (bound, stored_move) = if best_score > orig_alpha {
@@ -246,77 +249,8 @@ impl Searcher {
             (Bound::Upper, None)
         };
         self.tt
-            .store_at(key, depth, bound, best_score, ply, stored_move);
+            .store_at(key, depth, bound, best_score, ply, stored_move, static_eval);
         best_score
-    }
-
-    #[inline]
-    #[allow(clippy::too_many_arguments)]
-    fn record_beta_cutoff(
-        &mut self,
-        board: &Board,
-        key: u64,
-        depth: u8,
-        best_score: i32,
-        tried_quiets: &[Move],
-        cutoff_move: Move,
-        ply: usize,
-    ) {
-        self.record_quiet_cutoff(board, tried_quiets, cutoff_move, depth, ply);
-        self.tt
-            .store_at(key, depth, Bound::Lower, best_score, ply, Some(cutoff_move));
-    }
-
-    #[inline]
-    fn record_quiet_cutoff(
-        &mut self,
-        board: &Board,
-        tried_quiets: &[Move],
-        cutoff_move: Move,
-        depth: u8,
-        ply: usize,
-    ) {
-        if !is_quiet_move(board, cutoff_move) {
-            return;
-        }
-        let side = board.side_to_move();
-        let bonus = i32::from(depth) * i32::from(depth);
-        self.state.record_killer(ply, cutoff_move);
-        self.state.update_history(side, cutoff_move, bonus);
-        for &prev in tried_quiets {
-            self.state.update_history(side, prev, -bonus);
-        }
-    }
-
-    #[inline]
-    pub(super) fn search_window(
-        &mut self,
-        next_board: &Board,
-        child_depth: u8,
-        reduction: u8,
-        is_first: bool,
-        (alpha, beta): (i32, i32),
-        child_ctx: NodeCtx<'_>,
-    ) -> i32 {
-        self.state.path_keys.push(next_board.key());
-
-        let raw = if is_first {
-            -self.negamax(next_board, child_depth, -beta, -alpha, child_ctx)
-        } else {
-            let reduced_depth = child_depth.saturating_sub(reduction);
-            let mut score = -self.negamax(next_board, reduced_depth, -alpha - 1, -alpha, child_ctx);
-            if reduction > 0 && !self.state.aborted && score > alpha {
-                score = -self.negamax(next_board, child_depth, -alpha - 1, -alpha, child_ctx);
-            }
-            if !self.state.aborted && score > alpha && score < beta {
-                score = -self.negamax(next_board, child_depth, -beta, -alpha, child_ctx);
-            }
-            score
-        };
-
-        let result = if self.state.aborted { 0 } else { raw };
-        self.state.path_keys.pop();
-        result
     }
 }
 
