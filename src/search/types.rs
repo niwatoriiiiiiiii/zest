@@ -15,6 +15,15 @@ pub const MATE_THRESHOLD: i32 = MATE_SCORE - 256;
 /// Maximum supported search ply depth.
 pub const MAX_PLY: usize = 64;
 
+/// Default number of principal variations reported by search.
+pub const DEFAULT_MULTI_PV: usize = 1;
+
+/// Minimum allowed `MultiPV` option value.
+pub const MIN_MULTI_PV: usize = 1;
+
+/// Maximum allowed `MultiPV` option value.
+pub const MAX_MULTI_PV: usize = 32;
+
 /// Returns the mate score for a side delivering checkmate at `ply` half-moves from the root.
 #[must_use]
 #[inline]
@@ -62,6 +71,9 @@ pub struct SearchLimits {
 
     /// Maximum number of visited nodes (main search + quiescence) before aborting.
     pub max_nodes: Option<u64>,
+
+    /// Number of principal variations to find at the root (defaults to `1`).
+    pub multi_pv: Option<usize>,
 }
 
 impl SearchLimits {
@@ -71,6 +83,7 @@ impl SearchLimits {
         Self {
             max_depth: Some(max_depth),
             max_nodes: None,
+            multi_pv: None,
         }
     }
 
@@ -80,6 +93,7 @@ impl SearchLimits {
         Self {
             max_depth: None,
             max_nodes: Some(max_nodes),
+            multi_pv: None,
         }
     }
 
@@ -89,8 +103,25 @@ impl SearchLimits {
         Self {
             max_depth: Some(max_depth),
             max_nodes: Some(max_nodes),
+            multi_pv: None,
         }
     }
+
+    /// Returns a copy of these limits with `multi_pv` configured.
+    #[must_use]
+    pub const fn with_multi_pv(mut self, multi_pv: usize) -> Self {
+        self.multi_pv = Some(multi_pv);
+        self
+    }
+}
+
+/// A single principal variation line returned by `MultiPV` search.
+#[derive(Clone, PartialEq, Eq, Debug)]
+pub struct PvLine {
+    /// Score in centipawns from the root side-to-move perspective (or mate score).
+    pub score: i32,
+    /// Principal variation moves starting from the root position.
+    pub moves: Vec<Move>,
 }
 
 /// Result produced by a completed or interrupted search.
@@ -113,4 +144,7 @@ pub struct SearchResult {
 
     /// Principal variation starting from the root position.
     pub pv: Vec<Move>,
+
+    /// Ranked principal variations (length `1` for standard search, up to `multi_pv`).
+    pub pvs: Vec<PvLine>,
 }

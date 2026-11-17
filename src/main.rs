@@ -11,7 +11,7 @@ use std::time::{Duration, Instant};
 use zest::search::{SearchResult, Searcher};
 use zest::uci::{
     GoParams, ParseCommandError, UciCommand, UciSession, compute_search_limits,
-    compute_time_budget_ms, format_bestmove, format_info, parse_command,
+    compute_time_budget_ms, format_bestmove, format_info_lines, parse_command,
 };
 
 enum LoopEvent {
@@ -117,7 +117,9 @@ fn run_uci_loop() {
                     let _ = search.handle.join();
                 }
                 session.restore_searcher(*searcher);
-                let _ = writeln!(out, "{}", format_info(&result, elapsed_ms));
+                for line in format_info_lines(&result, elapsed_ms) {
+                    let _ = writeln!(out, "{line}");
+                }
                 let _ = writeln!(out, "{}", format_bestmove(&result));
                 let _ = out.flush();
             }
@@ -214,7 +216,7 @@ fn start_search(
     let board = *session.game().board();
     let history = session.game().history().to_vec();
     let halfmove_clock = session.game().halfmove_clock();
-    let limits = compute_search_limits(&params);
+    let limits = compute_search_limits(&params).with_multi_pv(session.multi_pv());
     let budget_ms = compute_time_budget_ms(&params, board.side_to_move());
     let deadline = budget_ms.map(|ms| Instant::now() + Duration::from_millis(ms));
     let mut searcher = Box::new(session.take_searcher());

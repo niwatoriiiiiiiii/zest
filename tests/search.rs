@@ -278,3 +278,27 @@ fn aspiration_recovers_cleanly_on_tactical_mate_swing() {
     assert_eq!(res.best_move, Some(uci("e2e5")));
     assert_eq!(mate_distance_in_moves(res.score), Some(2));
 }
+
+#[test]
+fn multi_pv_returns_distinct_ranked_lines() {
+    let board = Board::gardner_initial();
+    let mut searcher = Searcher::new();
+    let res = searcher.search(&board, &[], 0, SearchLimits::depth(4).with_multi_pv(3));
+
+    assert_eq!(res.depth, 4);
+    assert_eq!(res.pvs.len(), 3);
+    assert_eq!(res.best_move, res.pvs[0].moves.first().copied());
+    assert_eq!(res.score, res.pvs[0].score);
+    assert!(res.pvs[0].score >= res.pvs[1].score);
+    assert!(res.pvs[1].score >= res.pvs[2].score);
+
+    let first_moves: Vec<Move> = res
+        .pvs
+        .iter()
+        .filter_map(|line| line.moves.first().copied())
+        .collect();
+    assert_eq!(first_moves.len(), 3);
+    assert_ne!(first_moves[0], first_moves[1]);
+    assert_ne!(first_moves[0], first_moves[2]);
+    assert_ne!(first_moves[1], first_moves[2]);
+}

@@ -1,10 +1,11 @@
 use core::sync::atomic::AtomicBool;
 
 use crate::game::Game;
-use crate::search::{SearchResult, Searcher};
+use crate::search::{DEFAULT_MULTI_PV, MAX_MULTI_PV, MIN_MULTI_PV, SearchResult, Searcher};
 use crate::uci::command::{GoParams, PositionSpec, UciCommand};
 use crate::uci::format::{
-    format_bestmove, format_display, format_eval, format_info, format_perft_divide, format_uci_id,
+    format_bestmove, format_display, format_eval, format_info_lines, format_perft_divide,
+    format_uci_id,
 };
 use crate::uci::time::compute_search_limits;
 
@@ -13,6 +14,7 @@ use crate::uci::time::compute_search_limits;
 pub struct UciSession {
     game: Game,
     searcher: Option<Searcher>,
+    multi_pv: usize,
 }
 
 impl Default for UciSession {
@@ -28,6 +30,7 @@ impl UciSession {
         Self {
             game: Game::new(),
             searcher: Some(Searcher::new()),
+            multi_pv: DEFAULT_MULTI_PV,
         }
     }
 
@@ -43,6 +46,12 @@ impl UciSession {
         if let Some(searcher) = &mut self.searcher {
             searcher.clear_tt();
         }
+    }
+
+    /// Returns the active `MultiPV` setting.
+    #[must_use]
+    pub const fn multi_pv(&self) -> usize {
+        self.multi_pv
     }
 
     /// Takes ownership of the reusable [`Searcher`] for background execution.
@@ -89,7 +98,8 @@ impl UciSession {
     /// Executes a search for `params` while polling `stop` for early termination.
     #[must_use]
     pub fn search_with_stop(&mut self, params: &GoParams, stop: &AtomicBool) -> SearchResult {
-        let limits = compute_search_limits(params);
+        let mut limits = compute_search_limits(params);
+        limits.multi_pv = Some(self.multi_pv);
         let searcher = self.searcher.get_or_insert_with(Searcher::new);
         searcher.search_with_stop(
             self.game.board(),
@@ -116,7 +126,9 @@ impl UciSession {
             },
             UciCommand::Go(params) => {
                 let result = self.search_sync(params);
-                vec![format_info(&result, 0), format_bestmove(&result)]
+                let mut lines = format_info_lines(&result, 0);
+                lines.push(format_bestmove(&result));
+                lines
             }
             UciCommand::GoPerft(depth) => format_perft_divide(self.game.board(), *depth),
             UciCommand::Eval => format_eval(self.game.board()),
@@ -145,6 +157,14 @@ impl UciSession {
                 .set_hash_mb(mb);
         } else if name.eq_ignore_ascii_case("Clear Hash") {
             self.searcher.get_or_insert_with(Searcher::new).clear_tt();
+        } else if name.eq_ignore_ascii_case("MultiPV") {
+            let Some(raw) = value else {
+                return vec!["info string MultiPV option requires a numeric value".to_string()];
+            };
+            let Ok(count) = raw.parse::<usize>() else {
+                return vec![format!("info string invalid MultiPV value: {raw}")];
+            };
+            self.multi_pv = count.clamp(MIN_MULTI_PV, MAX_MULTI_PV);
         }
         Vec::new()
     }

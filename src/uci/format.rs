@@ -6,7 +6,8 @@ use crate::eval::{MAX_PHASE, evaluate_breakdown};
 use crate::game::Game;
 use crate::movegen::generate_legal_moves;
 use crate::search::{
-    DEFAULT_HASH_MB, MAX_HASH_MB, MIN_HASH_MB, SearchResult, is_mate_score, mate_distance_in_moves,
+    DEFAULT_HASH_MB, DEFAULT_MULTI_PV, MAX_HASH_MB, MAX_MULTI_PV, MIN_HASH_MB, MIN_MULTI_PV,
+    SearchResult, is_mate_score, mate_distance_in_moves,
 };
 
 /// Formats engine identification, supported options, and `uciok`.
@@ -19,6 +20,9 @@ pub fn format_uci_id() -> Vec<String> {
             "option name Hash type spin default {DEFAULT_HASH_MB} min {MIN_HASH_MB} max {MAX_HASH_MB}"
         ),
         "option name Clear Hash type button".to_string(),
+        format!(
+            "option name MultiPV type spin default {DEFAULT_MULTI_PV} min {MIN_MULTI_PV} max {MAX_MULTI_PV}"
+        ),
         "option name UCI_Variant type combo default gardner var gardner".to_string(),
         "uciok".to_string(),
     ]
@@ -44,11 +48,36 @@ pub fn format_display(game: &Game) -> Vec<String> {
 /// Formats a `SearchResult` as a Stockfish-compatible `info` line.
 #[must_use]
 pub fn format_info(result: &SearchResult, elapsed_ms: u64) -> String {
-    let score_str = if is_mate_score(result.score) {
-        mate_distance_in_moves(result.score)
-            .map_or_else(|| format!("cp {}", result.score), |m| format!("mate {m}"))
+    format_pv_line(result, result.score, &result.pv, None, elapsed_ms)
+}
+
+/// Formats one or more UCI `info` lines (with `multipv` indices when `result.pvs.len() > 1`).
+#[must_use]
+pub fn format_info_lines(result: &SearchResult, elapsed_ms: u64) -> Vec<String> {
+    if result.pvs.len() <= 1 {
+        return vec![format_info(result, elapsed_ms)];
+    }
+    result
+        .pvs
+        .iter()
+        .enumerate()
+        .map(|(idx, line)| {
+            format_pv_line(result, line.score, &line.moves, Some(idx + 1), elapsed_ms)
+        })
+        .collect()
+}
+
+fn format_pv_line(
+    result: &SearchResult,
+    score: i32,
+    pv: &[crate::core::Move],
+    multipv: Option<usize>,
+    elapsed_ms: u64,
+) -> String {
+    let score_str = if is_mate_score(score) {
+        mate_distance_in_moves(score).map_or_else(|| format!("cp {score}"), |m| format!("mate {m}"))
     } else {
-        format!("cp {}", result.score)
+        format!("cp {score}")
     };
 
     let nps = result
@@ -57,14 +86,15 @@ pub fn format_info(result: &SearchResult, elapsed_ms: u64) -> String {
         .checked_div(elapsed_ms)
         .unwrap_or(0);
 
+    let multipv_part = multipv.map_or_else(String::new, |idx| format!(" multipv {idx}"));
     let mut line = format!(
-        "info depth {} nodes {} nps {} hashfull {} time {} score {}",
+        "info depth {}{multipv_part} nodes {} nps {} hashfull {} time {} score {}",
         result.depth, result.nodes, nps, result.hashfull, elapsed_ms, score_str
     );
 
-    if !result.pv.is_empty() {
+    if !pv.is_empty() {
         let _ = write!(line, " pv");
-        for mv in &result.pv {
+        for mv in pv {
             let _ = write!(line, " {mv}");
         }
     }
