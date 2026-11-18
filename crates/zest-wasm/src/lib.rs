@@ -82,12 +82,7 @@ impl WasmEngine {
             multi_pv: Some(multi_pv.unwrap_or(DEFAULT_MULTI_PV)),
         };
         let mut searcher = self.session.take_searcher();
-        let result = searcher.search(
-            game.board(),
-            game.history(),
-            game.halfmove_clock(),
-            limits,
-        );
+        let result = searcher.search(game.board(), game.history(), game.halfmove_clock(), limits);
         self.session.restore_searcher(searcher);
         Ok(format_search_json(&result))
     }
@@ -160,8 +155,8 @@ fn format_search_json(res: &SearchResult) -> String {
     let best = res
         .best_move
         .map_or_else(|| "null".to_string(), |m| format!("\"{m}\""));
-    let mate = mate_distance_in_moves(res.score)
-        .map_or_else(|| "null".to_string(), |m| m.to_string());
+    let mate =
+        mate_distance_in_moves(res.score).map_or_else(|| "null".to_string(), |m| m.to_string());
 
     let mut out = format!(
         "{{\"bestMove\":{best},\"score\":{},\"isMate\":{},\"mateIn\":{mate},\"depth\":{},\"nodes\":{},\"hashfull\":{},\"phase\":{},\"wdl\":{},\"pvs\":[",
@@ -240,12 +235,7 @@ mod tests {
         assert!(wdl_json.contains("\"expected\":0.500000"));
 
         let mut searcher = Searcher::new();
-        let res = searcher.search(
-            &board,
-            &[],
-            0,
-            SearchLimits::depth(3).with_multi_pv(2),
-        );
+        let res = searcher.search(&board, &[], 0, SearchLimits::depth(3).with_multi_pv(2));
         let search_json = format_search_json(&res);
         assert!(search_json.contains("\"bestMove\":\""));
         assert!(search_json.contains("\"pvs\":["));
