@@ -1,3 +1,7 @@
+mod analysis;
+mod json;
+mod openings;
+
 use std::fmt::Write as _;
 
 use wasm_bindgen::prelude::*;
@@ -5,11 +9,11 @@ use zest::board::Board;
 use zest::eval::evaluate;
 use zest::game::Game;
 use zest::movegen::generate_legal_moves;
-use zest::search::{
-    DEFAULT_MULTI_PV, SearchLimits, SearchResult, Wdl, board_phase, is_mate_score,
-    mate_distance_in_moves,
-};
+use zest::search::{DEFAULT_MULTI_PV, SearchLimits, Wdl, board_phase};
 use zest::uci::{UciCommand, UciSession, parse_command};
+
+use crate::analysis::{DEFAULT_ANALYSIS_DEPTH, analyze_moves};
+use crate::json::{format_analysis_json, format_search_json, format_wdl_json, parse_moves_arg};
 
 /// Reusable WebAssembly wrapper around Zest's UCI session and search engine.
 #[wasm_bindgen]
@@ -86,6 +90,42 @@ impl WasmEngine {
         self.session.restore_searcher(searcher);
         Ok(format_search_json(&result))
     }
+
+    /// Analyzes a full game move sequence (`moves_input` accepts whitespace-separated UCI moves or a JSON string array)
+    /// and returns per-ply move classifications along with Accuracy and ACPL summaries as JSON.
+    ///
+    /// # Errors
+    ///
+    /// Returns a JS error string if `start_fen` is invalid or any move is illegal.
+    pub fn analyze_game(
+        &mut self,
+        start_fen: &str,
+        moves_input: &str,
+        depth: Option<u8>,
+    ) -> Result<String, JsValue> {
+        let owned = parse_moves_arg(moves_input);
+        let move_refs: Vec<&str> = owned.iter().map(String::as_str).collect();
+        let search_depth = depth.unwrap_or(DEFAULT_ANALYSIS_DEPTH);
+        let mut searcher = self.session.take_searcher();
+        let res = analyze_moves(start_fen, &move_refs, search_depth, &mut searcher);
+        self.session.restore_searcher(searcher);
+        let analysis = res.map_err(|err| JsValue::from_str(&err))?;
+        Ok(format_analysis_json(&analysis))
+    }
+}
+
+/// Returns the number of precomputed balanced openings bundled in WASM.
+#[wasm_bindgen]
+#[must_use]
+pub fn opening_count() -> usize {
+    openings::opening_count()
+}
+
+/// Returns the whitespace-joined UCI moves for the precomputed opening at `index`, or `None` if out of range.
+#[wasm_bindgen]
+#[must_use]
+pub fn opening_at(index: usize) -> Option<String> {
+    openings::opening_at(index).map(str::to_string)
 }
 
 impl WasmEngine {
@@ -139,63 +179,6 @@ pub fn wdl_for_fen(fen: &str, score: i32) -> Result<String, JsValue> {
     Ok(format_wdl_json(wdl, phase))
 }
 
-fn format_wdl_json(wdl: Wdl, phase: i32) -> String {
-    format!(
-        "{{\"win\":{},\"draw\":{},\"loss\":{},\"expected\":{:.6},\"phase\":{}}}",
-        wdl.win,
-        wdl.draw,
-        wdl.loss,
-        wdl.expected_score(),
-        phase
-    )
-}
-
-fn format_search_json(res: &SearchResult) -> String {
-    let wdl = Wdl::from_score(res.score, res.phase);
-    let best = res
-        .best_move
-        .map_or_else(|| "null".to_string(), |m| format!("\"{m}\""));
-    let mate =
-        mate_distance_in_moves(res.score).map_or_else(|| "null".to_string(), |m| m.to_string());
-
-    let mut out = format!(
-        "{{\"bestMove\":{best},\"score\":{},\"isMate\":{},\"mateIn\":{mate},\"depth\":{},\"nodes\":{},\"hashfull\":{},\"phase\":{},\"wdl\":{},\"pvs\":[",
-        res.score,
-        is_mate_score(res.score),
-        res.depth,
-        res.nodes,
-        res.hashfull,
-        res.phase,
-        format_wdl_json(wdl, res.phase)
-    );
-
-    for (idx, line) in res.pvs.iter().enumerate() {
-        if idx > 0 {
-            out.push(',');
-        }
-        let line_wdl = Wdl::from_score(line.score, res.phase);
-        let line_mate = mate_distance_in_moves(line.score)
-            .map_or_else(|| "null".to_string(), |m| m.to_string());
-        let _ = write!(
-            out,
-            "{{\"score\":{},\"isMate\":{},\"mateIn\":{line_mate},\"wdl\":{},\"moves\":[",
-            line.score,
-            is_mate_score(line.score),
-            format_wdl_json(line_wdl, res.phase)
-        );
-        for (m_idx, mv) in line.moves.iter().enumerate() {
-            if m_idx > 0 {
-                out.push(',');
-            }
-            let _ = write!(out, "\"{mv}\"");
-        }
-        out.push_str("]}");
-    }
-
-    out.push_str("]}");
-    out
-}
-
 #[cfg(test)]
 mod tests {
     use zest::search::Searcher;
@@ -240,5 +223,26 @@ mod tests {
         assert!(search_json.contains("\"bestMove\":\""));
         assert!(search_json.contains("\"pvs\":["));
         assert!(search_json.contains("\"wdl\":{"));
+    }
+
+    #[test]
+    fn wasm_analyze_game_and_openings_work() {
+        assert_eq!(opening_count(), 165);
+        assert!(opening_at(0).is_some());
+        assert_eq!(
+            parse_moves_arg("[\"a2a3\", \"b4a3\"]"),
+            vec!["a2a3", "b4a3"]
+        );
+
+        let mut engine = WasmEngine::new();
+        let fen = Board::gardner_initial().to_fen();
+        let json = engine
+            .analyze_game(&fen, "[\"a2a3\",\"b4a3\",\"b2a3\"]", Some(4))
+            .expect("analyze_game");
+        assert!(json.contains("\"white\":{"));
+        assert!(json.contains("\"black\":{"));
+        assert!(json.contains("\"plies\":["));
+        assert!(json.contains("\"tag\":\"Book\""));
+        assert!(json.contains("\"symbol\":\"📖\""));
     }
 }
