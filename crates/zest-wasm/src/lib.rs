@@ -1,4 +1,5 @@
 mod analysis;
+mod game_state;
 mod json;
 mod openings;
 
@@ -13,7 +14,11 @@ use zest::search::{DEFAULT_MULTI_PV, SearchLimits, Wdl, board_phase};
 use zest::uci::{UciCommand, UciSession, parse_command};
 
 use crate::analysis::{DEFAULT_ANALYSIS_DEPTH, analyze_moves};
-use crate::json::{format_analysis_json, format_search_json, format_wdl_json, parse_moves_arg};
+use crate::game_state::evaluate_game_state;
+use crate::json::{
+    format_analysis_json, format_game_state_json, format_search_json, format_wdl_json,
+    parse_moves_arg,
+};
 
 /// Reusable WebAssembly wrapper around Zest's UCI session and search engine.
 #[wasm_bindgen]
@@ -179,6 +184,20 @@ pub fn wdl_for_fen(fen: &str, score: i32) -> Result<String, JsValue> {
     Ok(format_wdl_json(wdl, phase))
 }
 
+/// Applies `moves_input` (whitespace-separated UCI moves or a JSON string array) from `start_fen`
+/// and returns the resulting FEN, game status, legal moves, and SAN history as JSON.
+///
+/// # Errors
+///
+/// Returns a JS error string if `start_fen` is invalid or any move is illegal.
+#[wasm_bindgen]
+pub fn apply_moves(start_fen: &str, moves_input: &str) -> Result<String, JsValue> {
+    let owned = parse_moves_arg(moves_input);
+    let move_refs: Vec<&str> = owned.iter().map(String::as_str).collect();
+    let snap = evaluate_game_state(start_fen, &move_refs).map_err(|err| JsValue::from_str(&err))?;
+    Ok(format_game_state_json(&snap))
+}
+
 #[cfg(test)]
 mod tests {
     use zest::search::Searcher;
@@ -244,5 +263,10 @@ mod tests {
         assert!(json.contains("\"plies\":["));
         assert!(json.contains("\"tag\":\"Book\""));
         assert!(json.contains("\"symbol\":\"📖\""));
+
+        let state = evaluate_game_state(&fen, &["a2a3", "b4a3"]).expect("state");
+        let state_json = format_game_state_json(&state);
+        assert!(state_json.contains("\"status\":\"ongoing\""));
+        assert!(state_json.contains("\"san\":\"bxa3\""));
     }
 }

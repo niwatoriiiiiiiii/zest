@@ -1,9 +1,11 @@
 use std::fmt::Write as _;
 
 use zest::core::Color;
+use zest::game::{DrawReason, GameStatus};
 use zest::search::{SearchResult, Wdl, is_mate_score, mate_distance_in_moves};
 
 use crate::analysis::{GameAnalysis, SideSummary};
+use crate::game_state::GameStateSnapshot;
 
 pub fn format_wdl_json(wdl: Wdl, phase: i32) -> String {
     format!(
@@ -134,6 +136,42 @@ pub fn format_analysis_json(analysis: &GameAnalysis) -> String {
             p.tag.name(),
             p.tag.symbol()
         );
+    }
+    out.push_str("]}");
+    out
+}
+
+pub fn format_game_state_json(snap: &GameStateSnapshot) -> String {
+    let side_str = match snap.side_to_move {
+        Color::White => "white",
+        Color::Black => "black",
+    };
+    let (status_str, winner_json, reason_json) = match snap.status {
+        GameStatus::Ongoing => ("ongoing", "null", "null"),
+        GameStatus::Checkmate(Color::White) => ("checkmate", "\"white\"", "null"),
+        GameStatus::Checkmate(Color::Black) => ("checkmate", "\"black\"", "null"),
+        GameStatus::Stalemate => ("stalemate", "null", "null"),
+        GameStatus::Draw(DrawReason::InsufficientMaterial) => ("draw", "null", "\"insufficient\""),
+        GameStatus::Draw(DrawReason::ThreefoldRepetition) => ("draw", "null", "\"repetition\""),
+        GameStatus::Draw(DrawReason::FiftyMoveRule) => ("draw", "null", "\"fifty_move\""),
+    };
+
+    let mut out = format!(
+        "{{\"fen\":\"{}\",\"sideToMove\":\"{side_str}\",\"inCheck\":{},\"status\":\"{status_str}\",\"winner\":{winner_json},\"drawReason\":{reason_json},\"legalMoves\":[",
+        snap.fen, snap.in_check
+    );
+    for (idx, mv) in snap.legal_moves.iter().enumerate() {
+        if idx > 0 {
+            out.push(',');
+        }
+        let _ = write!(out, "\"{mv}\"");
+    }
+    out.push_str("],\"history\":[");
+    for (idx, rec) in snap.history.iter().enumerate() {
+        if idx > 0 {
+            out.push(',');
+        }
+        let _ = write!(out, "{{\"uci\":\"{}\",\"san\":\"{}\"}}", rec.uci, rec.san);
     }
     out.push_str("]}");
     out
